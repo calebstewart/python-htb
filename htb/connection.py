@@ -115,11 +115,6 @@ class Connection(object):
         if self.email is not None and self.password is not None:
             r = self._request("/home", method="get")
 
-    def switch_vpn(self, vpn) -> None:
-        """ Switch to the specified VPN region """
-
-        pass
-
     @property
     def lab(self) -> VPN:
         """ Grab the Lab VPN object """
@@ -173,18 +168,22 @@ class Connection(object):
 
     @property
     def active(self) -> List[Machine]:
+        """ Grab all active machines """
         return [m for m in self.machines if not m.retired]
 
     @property
     def retired(self) -> List[Machine]:
+        """ Grab all retired machines """
         return [m for m in self.machines if m.retired]
 
     @property
     def todo(self) -> List[Machine]:
+        """ List of machines marked as "todo" """
         return [m for m in self.machines if m.todo]
 
     @property
     def assigned(self) -> Machine:
+        """ Return the machine assigned to your or None """
         for m in self.machines:
             if m.assigned:
                 return m
@@ -192,6 +191,7 @@ class Connection(object):
 
     @property
     def spawned(self) -> List[Machine]:
+        """ All spawned/running machines """
         return [m for m in self.machines if m.spawned]
 
     def __getitem__(self, value: Union[str, int]):

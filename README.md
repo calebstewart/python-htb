@@ -41,7 +41,7 @@ with open("htb.ovpn", "wb") as f:
 	f.write(cnxn.lab.config)
 
 # Grab the mango box and start it
-mango = [m for m in cnxn.machines if m.name == "Mango"]
+mango = [m for m in cnxn.machines if m.name == "Mango"][0]
 mango.spawned = True
 
 # Cancel all machine resets (probably shouldn't do this...)

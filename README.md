@@ -40,9 +40,14 @@ cnxn.lab.switch(htb.VPN.US_VIP)
 with open("htb.ovpn", "wb") as f:
 	f.write(cnxn.lab.config)
 
-# Grab the mango box and start it
-mango = [m for m in cnxn.machines if m.name == "Mango"][0]
-mango.spawned = True
+# Grab the mango box by name and start it
+cnxn["mango"].spawned = True
+
+# Cancel a reset on Bastion (ip 10.10.10.137)
+cnxn["10.10.10.137"].resetting = False
+
+# Schedule termination on Registry (id 213)
+cnxn[213].terminating = True
 
 # Cancel all machine resets (probably shouldn't do this...)
 for m in filter(lambda m: m.resetting, cnxn.machines):

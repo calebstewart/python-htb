@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Union
 import requests
+import re
 
 from htb.exceptions import AuthFailure
 from htb.vpn import VPN
@@ -192,3 +193,29 @@ class Connection(object):
     @property
     def spawned(self) -> List[Machine]:
         return [m for m in self.machines if m.spawned]
+
+    def __getitem__(self, value: Union[str, int]):
+        """ Lookup a machine based on either its integer ID or a regular
+        expression matching its name or IP address """
+
+        # Find the machine based on name regex
+        if isinstance(value, str):
+            m = [
+                m
+                for m in self.machines
+                if re.match(value, m.name, flags=re.IGNORECASE)
+                or re.match(value, m.ip, flags=re.IGNORECASE)
+            ]
+        # Find machine based on ID
+        elif isinstance(value, int):
+            m = [m for m in self.machines if m.id == value]
+        else:
+            # Invalid search
+            raise ValueError("expected machine id or name regex")
+
+        # Machine does not exist
+        if len(m) == 0:
+            raise KeyError("no matching machine found")
+
+        # Return first match
+        return m[0]

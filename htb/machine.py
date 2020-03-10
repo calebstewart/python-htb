@@ -82,6 +82,15 @@ class Machine(object):
         return f"""<Machine name="{self.name}",ip="{self.ip}",spawned={self.spawned}>"""
 
     @property
+    def matrix(self) -> Dict[str, List[int]]:
+        """ Get the rating matrix for this machine """
+        r = self.connection._api(f"/machines/get/matrix/{self.id}", method="get", cache=True)
+        if r["success"] != 1:
+            return {"aggregate": [0]*5, "maker": [0]*5}
+
+        return {"aggregate": r["aggregate"], "maker": r["maker"]}
+
+    @property
     def todo(self) -> bool:
         return self._todo
 

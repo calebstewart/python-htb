@@ -59,6 +59,7 @@ class HackTheBox(Cmd):
             "start": self._machine_start,
             "stop": self._machine_stop,
             "own": self._machine_own,
+            "info": self._machine_info,
         }
         actions[args.action](args)
         return False
@@ -199,6 +200,95 @@ class HackTheBox(Cmd):
 
         self.poutput(f"[+] scheduling termination for {m.name}")
         m.spawned = True
+
+    machine_info_parser = machine_subparsers.add_parser("info", aliases=["cat", "show"], help="Show detailed machine information", prog="machine info")
+    machine_info_parser.add_argument("machine", help="A name regex, IP address or machine ID to show")
+    machine_info_parser.set_defaults(action="info")
+
+    def _machine_info(self, args: argparse.Namespace) -> None:
+        """ Show detailed machine information """
+
+        try:
+            machine_id = int(args.machine)
+        except:
+            machine_id = args.machine
+
+        try:
+            m = self.cnxn[args.machine]
+        except KeyError:
+            self.perror(f"[!] {machine_id}: no such machine")
+
+        if m.spawned and not m.resetting and not m.terminating:
+            state = f"{Fore.GREEN}up{Fore.RESET} for {m.expires}"
+        elif m.terminating:
+            state = f"{Fore.RED}terminating{Fore.RESET}"
+        elif m.resetting:
+            state =f"{Fore.YELLOW}resetting{Fore.RESET}"
+        else:
+            state = f"{Fore.RED}off{Fore.RESET}"
+
+        if m.retired:
+            retiree = f"{Fore.YELLOW}retired{Fore.YELLOW}"
+        else:
+            retiree = f"{Fore.GREEN}active{Fore.RESET}"
+
+        output = []
+        output.append(
+            f"{Style.BRIGHT}{Fore.GREEN}{m.name}{Fore.RESET} - {Style.RESET_ALL}{m.ip}{Style.BRIGHT} - {Fore.CYAN}{m.os}{Fore.RESET} - {Fore.MAGENTA}{m.points}{Fore.RESET} points - {state}"
+        )
+
+        output.append("")
+        output.append(f"{Style.BRIGHT}Difficulty{Style.RESET_ALL}")
+        output.extend(["","","","",""])
+
+        # Lookup tables for creating the difficulty ratings
+        rating_char = ['\u2581', '\u2582', '\u2583', '\u2584', '\u2585', '\u2586', '\u2587', '\u2588']
+        rating_color = [*([Fore.GREEN]*3), *([Fore.YELLOW]*4), *([Fore.RED]*3)]
+
+        # Create scaled difficulty rating. Highest rated is full. Everything
+        # else is scaled appropriately.
+        max_ratings = max(m.ratings)
+        ratings = [round((float(r)/max_ratings)*40) for r in m.ratings]
+        difficulty = ""
+        for i, r in enumerate(ratings):
+            for row in range(1,6):
+                if r > (5-row)*8 and r <= (5-row+1)*8:
+                    output[-6+row] += rating_color[i]+rating_char[r % 8]*3
+                elif r > (5-row)*8:
+                    output[-6+row] += rating_color[i]+rating_char[7]*3
+                else:
+                    output[-6+row] += "   "
+
+        output.append(f"{Fore.GREEN}Easy     {Fore.YELLOW}   Medium   {Fore.RED}     Hard{Style.RESET_ALL}")
+        output.append("")
+        output.append(f"{Style.BRIGHT}Rating Matrix ({Fore.CYAN}maker{Fore.RESET}, {Style.DIM}{Fore.GREEN}user{Style.RESET_ALL}{Style.BRIGHT}){Style.RESET_ALL}")
+        output.extend(["","","","",""])
+        column_widths = [6, 8, 6, 10, 6]
+
+        for i in range(5):
+            for row in range(5):
+                content = f"{'MMAA':^{column_widths[i]}}"
+                if (m.matrix["maker"][i]*4) >= ((row+1)*8):
+                    content = content.replace("MM", f"{Fore.CYAN}{rating_char[7]*2}")
+                elif (m.matrix["maker"][i]*4) > (row*8):
+                    content = content.replace("MM", f"{Fore.CYAN}{rating_char[round(m.matrix['maker'][i]*4) % 8]*2}")
+                else:
+                    content = content.replace("MM", " "*2)
+                if (m.matrix["aggregate"][i]*4) >= ((row+1)*8):
+                    content = content.replace("AA", f"{Style.DIM}{Fore.GREEN}{rating_char[7]*2}{Style.RESET_ALL}")
+                elif (m.matrix["aggregate"][i]*4) > (row*8):
+                    content = content.replace("AA", f"{Style.DIM}{Fore.GREEN}{rating_char[round(m.matrix['maker'][i]*4) % 8]*2}{Style.RESET_ALL}")
+                else:
+                    content = content.replace("AA", " "*2)
+                output[-1-row] += content
+        
+        output.append(f"{'Enum':^{column_widths[0]}}{'R-Life':^{column_widths[1]}}{'CVE':^{column_widths[2]}}{'Exploit':^{column_widths[3]}}{'CTF':^{column_widths[4]}}")
+
+        output.append("")
+        output.append(f"{Style.BRIGHT}      User  Root{Style.RESET_ALL}")
+        output.append(f"{Style.BRIGHT}Owns  {Style.RESET_ALL}{Fore.YELLOW}{m.user_owns:<6}{Fore.RED}{m.root_owns}{Style.RESET_ALL}")
+
+        self.ppaged("\n".join(output))
 
     machine_own_parser = machine_subparsers.add_parser("own", aliases=["submit", "shutdown"], help="Submit a root or user flag", prog="machine own")
     machine_own_parser.add_argument("--rate", "-r", type=int, default=0, choices=range(1,100), help="Difficulty Rating (1-100)")

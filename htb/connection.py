@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 from typing import Any, Dict, List, Union
 import requests
+import time
 import re
 
 from htb.exceptions import AuthFailure
@@ -26,8 +27,30 @@ class Connection(object):
         # Ensure we can authenticate with this api key
         self._authenticate()
 
-    def _api(self, endpoint, args={}, method="post", **kwargs) -> Dict:
+        # API result cache
+        self._cache: Dict[str, Any] = {}
+        self.cache_timeout: float = 60
+
+        # Ongoing session for standard authentication
+        self.session = requests.Session()
+
+    def invalidate_cache(self, endpoint: str = None, method: str = None) -> None:
+        """ Invalidate the cache of one endpoint, endpoint/method or all entries """
+
+        if endpoint is None:
+            self._cache = {}
+        elif method is None and endpoint in self._cache:
+            self._cache[endpoint] = {}
+        elif endpoint in self._cache and method in self._cache[endpoint]:
+            self._cache[endpoint][method] = (0, None)
+
+    def _api(self, endpoint, args={}, method="post", cache=False, **kwargs) -> Dict:
         """ Send an API requests with the stored API key """
+
+        # If requested, attempt to cache the response for up to `self.cache_timeout` seconds
+        if cache and  endpoint in self._cache and method in self._cache[endpoint]:
+            if (time.time() - self._cache[endpoint][method][0]) < self.cache_timeout:
+                return self._cache[endpoint][method][1]
 
         # Construct necessary parameters for request
         url = f"{Connection.BASE_URL}/api/{endpoint.lstrip('/')}"
@@ -53,35 +76,63 @@ class Connection(object):
             if isinstance(response["success"], str):
                 response["success"] = int(response["success"])
 
+        # Save the response for future cache reuse
+        if cache:
+            if endpoint not in self._cache:
+                self._cache[endpoint] = {}
+            self._cache[endpoint][method] = (time.time(), response)
+
         return response
 
-    def _request(self, endpoint, method, auth=True, **kwargs) -> requests.Response:
+    def _request(self, endpoint, method, _retry_auth=True, **kwargs) -> requests.Response:
         """ Make a standard (non-api) request. May require authentication prior,
         but in order to authenticate, the connection must have been given
         credentials beyond the required auth token. """
 
-        # If we are going to authenticate, we need to track our session
-        if auth:
-            s = requests.Session()
-        else:
-            s = requests
-
         # Easy lookup table for request method
-        methods = {"get": s.get, "post": s.post}
+        methods = {"get": self.session.get, "post": self.session.post}
         headers = {"User-Agent": "https://github.com/calebstewart/python-htb"}
 
-        if auth:
+        if "headers" in kwargs:
+            kwargs["headers"].update(headers)
+        else:
+            kwargs["headers"] = headers
 
-            if self.email is None or self.password is None:
-                raise AuthError("No credentials provided")
+        # Send request
+        r = methods[method](
+            f"{Connection.BASE_URL}/{endpoint.lstrip('/')}", allow_redirects=False, **kwargs
+        )
+
+        if r.status_code == 302:
+            if _retry_auth:
+                self._authenticate()
+                return self._request(endpoint, method, _retry_auth=False, **kwargs)
+            else:
+                raise AuthFailure
+
+        return r
+
+
+    def _authenticate(self) -> None:
+        """ Check that the provided API key is valid and query user details """
+
+        # Attempt to grab connection status
+        r = self._api("/users/htb/connection/status")
+
+        # Test email/password auth as well
+        if self.email is not None and self.password is not None:
+
+            # Build session object
+            self.session = requests.Session()
+            headers = {"User-Agent": "https://github.com/calebstewart/python-htb"}
 
             # Grab CSRF Token
-            r = s.get(f"{Connection.BASE_URL}/login", headers=headers)
+            r = self.session.get(f"{Connection.BASE_URL}/login", headers=headers)
             data = r.text.split('id="loginForm"')[1]
             token = data.split('_token" value="')[1].split('"')[0]
 
             # Authenticate
-            r = s.post(
+            r = self.session.post(
                 f"{Connection.BASE_URL}/login",
                 data={"_token": token, "email": self.email, "password": self.password},
                 allow_redirects=False,
@@ -95,25 +146,6 @@ class Connection(object):
             ):
                 raise AuthFailure
 
-        if "headers" in kwargs:
-            kwargs["headers"].update(headers)
-        else:
-            kwargs["headers"] = headers
-
-        # Send request
-        return methods[method](
-            f"{Connection.BASE_URL}/{endpoint.lstrip('/')}", **kwargs
-        )
-
-    def _authenticate(self) -> None:
-        """ Check that the provided API key is valid and query user details """
-
-        # Attempt to grab connection status
-        r = self._api("/users/htb/connection/status")
-
-        # Test email/password auth as well
-        if self.email is not None and self.password is not None:
-            r = self._request("/home", method="get")
 
     @property
     def lab(self) -> VPN:
@@ -132,16 +164,16 @@ class Connection(object):
         """ Grab the list of active machines """
 
         # Request all the machine information
-        machines = self._api("/machines/get/all", method="get")
-        owns = self._api("/machines/owns", method="get")
-        difficulties = self._api("/machines/difficulty", method="get")
-        reviews = self._api("/machines/reviews", method="get")
-        todos = self._api("/machines/todo", method="get")
-        expiry = self._api("/machines/expiry", method="get")
-        spawned = self._api("/machines/spawned", method="get")
-        terminating = self._api("/machines/terminating", method="get")
-        assigned = self._api("/machines/assigned", method="get")
-        resetting = self._api("/machines/resetting", method="get")
+        machines = self._api("/machines/get/all", method="get", cache=True)
+        owns = self._api("/machines/owns", method="get", cache=True)
+        difficulties = self._api("/machines/difficulty", method="get", cache=True)
+        reviews = self._api("/machines/reviews", method="get", cache=True)
+        todos = self._api("/machines/todo", method="get", cache=True)
+        expiry = self._api("/machines/expiry", method="get", cache=True)
+        spawned = self._api("/machines/spawned", method="get", cache=True)
+        terminating = self._api("/machines/terminating", method="get", cache=True)
+        assigned = self._api("/machines/assigned", method="get", cache=True)
+        resetting = self._api("/machines/resetting", method="get", cache=True)
 
         # Create dictionary mapping machine ID to machine description
         machines = {machine["id"]: machine for machine in machines}

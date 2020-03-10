@@ -22,7 +22,7 @@ class Machine(object):
         self.release_date: str = data["release"]
         self.retire_date: str = data["retired_date"]
         self.makers: List[Dict] = [data["maker"]]
-        self.rating: float = data["rating"]
+        self.rating: float = float(data["rating"])
         self.user_owns: int = data["user_owns"]
         self.root_owns: int = data["root_owns"]
         self.retired: bool = data["retired"]
@@ -205,7 +205,7 @@ class Machine(object):
             json={"flag": flag, "difficulty": difficulty, "id": self.id},
         )
 
-        return r["success"] != 0
+        return int(r["success"]) != 0
 
     def extend(self) -> bool:
         """ Extend machine uptime """

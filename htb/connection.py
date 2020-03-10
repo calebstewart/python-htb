@@ -194,6 +194,11 @@ class Connection(object):
         """ All spawned/running machines """
         return [m for m in self.machines if m.spawned]
 
+    def shout(self, message) -> None:
+        """ Send a message on the shoutbox """
+        r = self._api("/shouts/new/", data={"text": message})
+        return r
+
     def __getitem__(self, value: Union[str, int]):
         """ Lookup a machine based on either its integer ID or a regular
         expression matching its name or IP address """

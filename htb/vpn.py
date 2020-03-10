@@ -27,11 +27,11 @@ class VPN(object):
             self.active: bool = False
         else:
             self.active: bool = True
-            self.user: str = data["name"]
-            self.ipv4: str = data["ip4"]
-            self.ipv6: str = data["ip6"]
-            self.rate_up: float = data["up"]
-            self.rate_down: float = data["down"]
+            self.user: str = data["connection"]["name"]
+            self.ipv4: str = data["connection"]["ip4"]
+            self.ipv6: str = data["connection"]["ip6"]
+            self.rate_up: float = data["connection"]["up"]
+            self.rate_down: float = data["connection"]["down"]
 
         # Server information is always available
         self.hostname = data["server"]["serverHostname"]
@@ -50,6 +50,21 @@ class VPN(object):
         r = self.connection._api(f"/labs/switch/{lab}", method="post")
         if int(r["status"]) != 1:
             raise RequestFailed(r["error"])
+
+    @property
+    def name(self) -> str:
+        name_map = {
+            "us-free": VPN.US_FREE,
+            "us-vip": VPN.US_VIP,
+            "eu-free": VPN.EU_FREE,
+            "eu-vip": VPN.EU_VIP,
+            "au-free": VPN.AU_FREE,
+            "-fort-": "fortress",
+        }
+
+        for piece in name_map:
+            if piece in self.hostname:
+                return name_map[piece]
 
     @property
     def config(self) -> bytes:

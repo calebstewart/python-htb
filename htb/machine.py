@@ -84,11 +84,19 @@ class Machine(object):
     @property
     def matrix(self) -> Dict[str, List[int]]:
         """ Get the rating matrix for this machine """
-        r = self.connection._api(f"/machines/get/matrix/{self.id}", method="get", cache=True)
+        r = self.connection._api(
+            f"/machines/get/matrix/{self.id}", method="get", cache=True
+        )
         if r["success"] != 1:
-            return {"aggregate": [0]*5, "maker": [0]*5}
+            return {"aggregate": [0] * 5, "maker": [0] * 5}
 
         return {"aggregate": r["aggregate"], "maker": r["maker"]}
+
+    @property
+    def blood(self) -> Dict[str, str]:
+        """ Grab machine blood information """
+        r = self.connection._api(f"/machines/get/{self.id}", method="get", cache=True)
+        return {"user": r["user_blood"], "root": r["root_blood"]}
 
     @property
     def todo(self) -> bool:
@@ -196,8 +204,8 @@ class Machine(object):
             return
 
         # Attempt the reset
-        action = "" if value else "cancel/"
-        r = self.connection._api(f"/vm/reset/{action}{self.id}", method="post")
+        action = "/vm/reset" if value else "/machines/reset/cancel"
+        r = self.connection._api(f"{action}/{self.id}", method="post")
 
         # Raise exception on failure
         if r["success"] != 1:

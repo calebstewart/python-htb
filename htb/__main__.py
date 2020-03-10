@@ -226,11 +226,7 @@ class HackTheBox(Cmd):
             self.poutput(f"[-] incorrect flag")
 
 
-
-        
-
-
-if __name__ == "__main__":
+def main():
 
     # Build argument parser
     parser = argparse.ArgumentParser(description="Python3 API for the Hack the Box Platform", prog="htb")
@@ -248,4 +244,7 @@ if __name__ == "__main__":
         sys.exit(0)
 
     sys.exit(cmd.cmdloop())
+
+if __name__ == "__main__":
+    main()
 

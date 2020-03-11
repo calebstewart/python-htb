@@ -13,42 +13,29 @@ A Python3 API for interacting with the Hack the Box platform.
 - Start and stop machines (w/ VIP this works for all machines, only active
   machines are supported for free labs)
 - Cancel termination or reset of machines
-
-## Planned Features
-
 - Send messages to the Shoutbox (including `/{command}` commands)
-- Recieve new messages from Shoutbox
-- Command line interface (e.g. `python -m htb machines active` to list all
-  active machines)
+- Command line interface
 
 ## Example Command Line Usage
 
 The Command Line Interface provides two methods for invocation. The first
 simply runs a single command and exits. This is the type of invocation you
 can expect from a shellscript. By default, the configuration information
-is read from a file located at `$HOME/.htbrc`, but can be changed. 
-
-To get a list of command line options, you can use `--help`:
-
-```
-$ python -m htb --help
-usage: htb [-h] [--config CONFIG]
-
-Python3 API for the Hack the Box Platform
-
-optional arguments:
-  -h, --help            show this help message and exit
-  --config CONFIG, -c CONFIG
-```
+is read from a file located at `$HOME/.htbrc`, but can also be specified 
+with the environment variable `HTBRC`.
 
 To get a list of valid commands, you can use the `help` command:
 
 ```
-$ python -m htb help
+python-htb on  master [!] via python-htb took 2s 
+➜ python -m htb help -v    
+
 Documented commands (use 'help -v' for verbose/'help <topic>' for details):
 
 Hack the Box
 ================================================================================
+invalidate          Invalidate API cache
+lab                 View and manage lab VPN connection
 machine             View and manage active and retired machines
 
 Uncategorized
@@ -67,7 +54,8 @@ shell               Execute a command as if at the OS prompt
 shortcuts           List available shortcuts
 ```
 
-To run a command, simply append it to your call. This is the first method of invocation:
+To run a command, simply append it to the command line when invoking the module.
+This is the first method of invocation:
 
 ```
 $ python -m htb machine list --active
@@ -98,14 +86,194 @@ Next, you can enter an interactive Hack the Box interpreter by
 ommitting the command:
 
 ```
-$ python -m htb
-htb ➜ machine list --active
-      Name         Address        Difficulty Rate Owned  State
-200   Rope         10.10.10.148   ▂▁▁▁▁▁▂▃▄▇ 4.6   $ #   off
-211   Sniper       10.10.10.151   ▁▁▂▄▂▇▇▅▂▂ 4.6   $     off
-212   Forest       10.10.10.161   ▂▂▅▆▂▆▇▆▃▃ 4.6   $ #   11 hours
-213   Registry     10.10.10.159   ▂▂▄▆▂▆▇▅▃▂ 4.5   $ #   off
+python-htb on  master [!] via python-htb took 3s 
+➜ python -m htb machine info --assigned
+Sniper - 10.10.10.151 - Windows - 30 points - up for 23 hours
+
+Difficulty
+               ▆▆▆▁▁▁         
+               ██████▂▂▂      
+         ▃▃▃   █████████      
+      ▂▂▂███   █████████▂▂▂▃▃▃
+▃▃▃▃▃▃████████████████████████
+Easy        Medium        Hard
+
+Rating Matrix (maker, user)
+        ▅▅                          
+ ██▁▁   ████           ██           
+ ████   ████     ▁▁    ██▁▁         
+ ████   ████     ██    ████         
+ ████   ████   ████    ████    ▅▅██ 
+ Enum  R-Life  CVE   Exploit   CTF  
+
+      User      Root
+Owns  1991      1769
+Blood snowscan  snowscan
 ```
+
+## Available Commands
+
+### `machine list`
+
+List available machines on the Hack the Box platform. Results are paged if too
+numerous to fit on screen and not redirected. Currently assigned machine is
+highlighted by an asterics following the machine ID.
+
+```
+htb ➜ machine list --help
+Usage: machine list [-h] [--inactive] [--active] [--owned] [--unowned] [--todo]
+
+optional arguments:
+  -h, --help      show this help message and exit
+  --inactive, -i
+  --active, -a
+  --owned, -o
+  --unowned, -u
+  --todo, -t
+```
+
+### `machine info`
+
+Display detailed machine information. This includes difficulty graph and rating
+matrix (both user and maker).
+
+```
+htb ➜ machine info --help
+Usage: machine info [-h] (--assigned | machine)
+
+positional arguments:
+  machine         A name regex, IP address or machine ID
+
+optional arguments:
+  -h, --help      show this help message and exit
+  --assigned, -a  Perform action on the currently assigned machine
+```
+
+### `machine up`
+
+Start a machine instance in your current lab. This command is only valid for
+VIP users, and will fail if another machine is already assigned to your
+account.
+
+```
+htb ➜ machine up --help
+Usage: machine up [-h] machine
+
+positional arguments:
+  machine     A name regex, IP address or machine ID to start
+
+optional arguments:
+  -h, --help  show this help message and exit
+```
+
+### `machine reset`
+
+Issue a reset for the given machine. Resets happen after two minutes and can be
+cancelled by other users in your lab. Check the `info` or `list` output for this
+machine periodically after issuing to see if another user cancelled your reset.
+
+```
+htb ➜ machine reset --help
+Usage: machine reset [-h] machine
+
+positional arguments:
+  machine     A name regex, IP address or machine ID
+
+optional arguments:
+  -h, --help  show this help message and exit
+```
+
+### `machine own`
+
+Submit a user or root flag for a given machine. If no rating is specified, a rating
+of `0` is submitted (same as default on website).
+
+```
+htb ➜ machine own --help
+Usage: machine own [-h]
+                   [--rate {1-100}]
+                   [--assigned]
+                   [machine] flag
+
+positional arguments:
+  machine               A name regex, IP address or machine ID
+  flag                  The user or root flag
+
+optional arguments:
+  -h, --help            show this help message and exit
+  --rate, -r {1-100}
+                        Difficulty Rating (1-100)
+  --assigned, -a        Perform action on the currently assigned machine
+```
+
+### `machine init`
+
+Setup a directory tree for machine analysis and perform initial scans. This
+routine will create the following directory tree:
+
+{machine.name}.htb/
+  -> artifacts/
+  -> exploits/
+  -> scans/
+  -> img/
+  -> README.md
+
+It then adds the given machine to `/etc/hosts`, ensures the machine is running
+and then starts a variety of basic scans on the target. Currently, the scans
+aren't implemented yet, but they will eventually look similar to the basic
+structure of my [init-machine](https://github.com/calebstewart/init-machine)
+script.
+
+```
+htb ➜ machine init --help
+Usage: machine init [-h] [--path PATH] [--tld TLD] (--assigned | machine)
+
+positional arguments:
+  machine          A name regex, IP address or machine ID to start
+
+optional arguments:
+  -h, --help       show this help message and exit
+  --path, -p PATH  Location to build analysis directory (default: ./{machine-name}.{tld}
+  --tld, -t TLD    The Top-Level Domain (TLD) to use in the /etc/hosts file (default: htb)
+  --assigned, -a   Perform action on the currently assigned machine
+```
+
+### `lab status`
+
+Display the current status of the lab VPN connection.
+
+### `lab switch`
+
+Change VPN servers.
+
+```
+htb ➜ lab switch --help
+Usage: lab switch [-h] {usfree, usvip, eufree, euvip, aufree}
+
+Show the connection status of the currently assigned lab VPN
+
+positional arguments:
+  {usfree, usvip, eufree, euvip, aufree}
+                        The lab to switch to
+
+optional arguments:
+  -h, --help            show this help message and exit
+```
+
+### `lab config`
+
+This command retrieves and outputs the contents of your OVPN configuration
+file. An E-mail and password must be set in your configuration file for
+this call to work (`api_token` alone is **not** enough).
+
+### `invalidate`
+
+The connection object maintains an API response cache by default for up to
+one minute. This command will flush/invalidate the cache in order to force
+a refresh of the data in the connection object. If you notice stale
+information or require the most up to date machine status, then use this
+command. It is not useful from the CLI interface. It only has relevance
+from a long-running REPL context.
 
 ## Example Module Usage
 

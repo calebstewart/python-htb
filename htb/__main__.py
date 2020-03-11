@@ -682,6 +682,7 @@ Preliminary scanning structure. Any completed scans are stored under `./scans`.
     )
 
     @cmd2.with_argparser(lab_parser)
+    @cmd2.with_category("Hack the Box")
     def do_lab(self, args: argparse.Namespace) -> bool:
         """ Execute the various lab sub-commands """
         actions = {
@@ -761,6 +762,7 @@ Preliminary scanning structure. Any completed scans are stored under `./scans`.
         except AuthFailure:
             self.perror("[!] authentication failure (did you supply email/password?)")
 
+    @cmd2.with_category("Hack the Box")
     def do_invalidate(self, args) -> None:
         """ Invalidate API cache """
         self.cnxn.invalidate_cache()
@@ -768,21 +770,17 @@ Preliminary scanning structure. Any completed scans are stored under `./scans`.
 
 def main():
 
-    # Build argument parser
-    parser = argparse.ArgumentParser(
-        description="Python3 API for the Hack the Box Platform", prog="htb"
-    )
-    parser.add_argument("--config", "-c", required=False, type=str, default="~/.htbrc")
-
-    # Parse arguments
-    args, remaining = parser.parse_known_args()
+    if "HTBRC" in os.environ:
+        config = os.environ["HTBRC"]
+    else:
+        config = "~/.htbrc"
 
     # Build REPL object
-    cmd = HackTheBox(resource=args.config)
+    cmd = HackTheBox(resource=config)
 
     # Run remaning arguments as a command
-    if len(remaining):
-        cmd.onecmd(" ".join([shlex.quote(x) for x in remaining]))
+    if len(sys.argv) > 1:
+        cmd.onecmd(" ".join([shlex.quote(x) for x in sys.argv[1:]]))
         sys.exit(0)
 
     sys.exit(cmd.cmdloop())

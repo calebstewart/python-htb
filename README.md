@@ -211,12 +211,12 @@ optional arguments:
 Setup a directory tree for machine analysis and perform initial scans. This
 routine will create the following directory tree:
 
-{machine.name}.htb/
-  -> artifacts/
-  -> exploits/
-  -> scans/
-  -> img/
-  -> README.md
+- {machine.name}.htb/
+  - artifacts/
+  - exploits/
+  - scans/
+  - img/
+  - README.md
 
 It then adds the given machine to `/etc/hosts`, ensures the machine is running
 and then starts a variety of basic scans on the target. Currently, the scans

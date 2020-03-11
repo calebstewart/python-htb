@@ -3,10 +3,15 @@ import cmd2
 from cmd2 import Cmd
 from cmd2.argparse_custom import Cmd2ArgumentParser
 import configparser
+import NetworkManager
+import subprocess
 from colorama import Fore, Style, Back
 import argparse
 import os.path
+import tempfile
 import shlex
+import time
+import dbus
 import sys
 import os
 
@@ -29,6 +34,10 @@ class HackTheBox(Cmd):
         # Read configuration
         parser = configparser.ConfigParser(interpolation=None)
         parser.read(path_resource)
+
+        # Save the configuration for later
+        self.config_path: str = path_resource
+        self.config = parser
 
         # Extract relevant information
         email = parser["htb"].get("email", None)
@@ -689,6 +698,9 @@ Preliminary scanning structure. Any completed scans are stored under `./scans`.
             "status": self._lab_status,
             "switch": self._lab_switch,
             "config": self._lab_config,
+            "connect": self._lab_connect,
+            "disconnect": self._lab_disconnect,
+            "import": self._lab_import,
         }
         actions[args.action](args)
         return False
@@ -761,6 +773,214 @@ Preliminary scanning structure. Any completed scans are stored under `./scans`.
             self.poutput(self.cnxn.lab.config.decode("utf-8"))
         except AuthFailure:
             self.perror("[!] authentication failure (did you supply email/password?)")
+
+    lab_connect_parser = lab_subparsers.add_parser(
+        "connect",
+        description="Connect to the Hack the Box VPN. If no previous configuration has been created in NetworkManager, it attempts to download it and import it.",
+        prog="lab connect",
+    )
+    lab_connect_parser.add_argument(
+        "--update",
+        "-u",
+        action="store_true",
+        help="Force a redownload/import of the OpenVPN configuration",
+    )
+    lab_connect_parser.set_defaults(action="connect")
+
+    def _lab_connect(self, args: argparse.Namespace) -> None:
+        """ Connect to the Hack the Box VPN using NetworkManager """
+
+        if "lab" not in self.config or "connection" not in self.config["lab"]:
+            # We need to download and import the OVPN configuration file
+            with tempfile.NamedTemporaryFile() as ovpn:
+                # Write the configuration to a file
+                ovpn.write(self.cnxn.lab.config)
+
+                # Import the connection w/ Network Manager
+                p = subprocess.run(
+                    ["nmcli", "c", "import", "type", "openvpn", "file", ovpn.name],
+                    capture_output=True,
+                )
+                if p.returncode != 0:
+                    self.perror("[!] failed to import vpn configuration")
+                    return
+
+            # Parse the UUID out of the output
+            uuid = p.stdout.split(b"(")[1].split(b")")[0].decode("utf-8")
+            self.poutput(f"[+] imported vpn configuration w/ uuid {uuid}")
+
+            # Save the uuid in our configuration file
+            self.config["lab"] = {}
+            self.config["lab"]["connection"] = uuid
+            with open(self.config_path, "w") as f:
+                self.config.write(f)
+
+            # Grab the connection object
+            connection = NetworkManager.Settings.GetConnectionByUuid(uuid)
+
+            # Ensure the routing settings are correct
+            connection_settings = connection.GetSettings()
+            connection_settings["connection"]["id"] = "python-htb"
+            connection_settings["ipv4"]["never-default"] = True
+            connection_settings["ipv6"]["never-default"] = True
+            connection.Update(connection_settings)
+
+        else:
+            # Grab the UUID from the previously loaded configuration
+            uuid = self.config["lab"]["connection"]
+
+            # Grab the connection object
+            connection = NetworkManager.Settings.GetConnectionByUuid(uuid)
+            if connection is None:
+                self.perror(
+                    "[!] vpn configuration not found (hint: try 'lab import --reload')"
+                )
+                return
+
+        # Check if this connection is active on any devices
+        for active_connection in NetworkManager.NetworkManager.ActiveConnections:
+            if active_connection.Uuid == uuid:
+                self.poutput(f"[+] vpn connection already active")
+                return
+
+        # Activate the connection
+        for device in NetworkManager.NetworkManager.GetDevices():
+            # Attempt to activate the VPN on each wired and wireless device...
+            # I couldn't find a good way to do this intelligently other than
+            # trying them until one worked...
+            if (
+                device.DeviceType == NetworkManager.NM_DEVICE_TYPE_ETHERNET
+                or device.DeviceType == NetworkManager.NM_DEVICE_TYPE_WIFI
+            ):
+                try:
+                    active_connection = NetworkManager.NetworkManager.ActivateConnection(
+                        connection, device, "/"
+                    )
+                    if active_connection is None:
+                        self.perror("[!] failed to activate vpn connection")
+                        return
+                except dbus.exceptions.DBusException:
+                    continue
+                else:
+                    break
+        else:
+            self.perror("[!] vpn connection failed")
+            return
+
+        # Wait for VPN to become active or transition to failed
+        while (
+            active_connection.VpnState
+            < NetworkManager.NM_VPN_CONNECTION_STATE_ACTIVATED
+        ):
+            time.sleep(0.5)
+
+        if (
+            active_connection.VpnState
+            != NetworkManager.NM_VPN_CONNECTION_STATE_ACTIVATED
+        ):
+            self.perror("[!] vpn connection failed")
+            return
+
+        self.poutput(
+            f"[+] connected w/ ipv4 address: {active_connection.Ip4Config.Addresses[0][0]}/{active_connection.Ip4Config.Addresses[0][1]}"
+        )
+
+    lab_disconnect_parser = lab_subparsers.add_parser(
+        "disconnect",
+        description="Disconnect from the Hack the Box lab VPN",
+        prog="lab disconnect",
+    )
+    lab_disconnect_parser.set_defaults(action="disconnect")
+
+    def _lab_disconnect(self, args: argparse.Namespace) -> None:
+        """ Disconnect from Hack the Box VPN via Network Manager """
+
+        if "lab" not in self.config or "connection" not in self.config["lab"]:
+            self.perror(
+                '[!] lab vpn configuration not imported (hint: use "lab import")'
+            )
+            return
+
+        for c in NetworkManager.NetworkManager.ActiveConnections:
+            if c.Uuid == self.config["lab"]["connection"]:
+                NetworkManager.NetworkManager.DeactivateConnection(c)
+                self.poutput("[+] vpn connection deactivated")
+                break
+        else:
+            self.poutput("[!] vpn connection not active")
+
+    lab_import_parser = lab_subparsers.add_parser(
+        "import",
+        description="Import your OpenVPN configuration into Network Manager",
+        prog="lab import",
+    )
+    lab_import_parser.add_argument(
+        "--reload",
+        "-r",
+        action="store_true",
+        help="Reload configuration from Hack the Box",
+    )
+    lab_import_parser.add_argument(
+        "--name", "-n", default="python-htb", help="NetworkManager Connection ID"
+    )
+    lab_import_parser.set_defaults(action="import")
+
+    def _lab_import(self, args: argparse.Namespace) -> None:
+        """ Import OpenVPN configuration into NetworkManager """
+
+        # Have we already imported the configuration?
+        if "lab" in self.config and "connection" in self.config["lab"]:
+            # Only reload if asked
+            if not args.reload:
+                self.poutput("[!] vpn configuration already imported")
+                return
+
+            # Grab the connection
+            c = NetworkManager.Settings.GetConnectionByUuid(
+                self.config["lab"]["connection"]
+            )
+            if c is None:
+                # This is weird... The user must have removed it manually
+                self.pwarning("[!] invalid uuid found in config")
+            else:
+                # Delete the connection
+                c.Delete()
+
+        # We need to download and import the OVPN configuration file
+        with tempfile.NamedTemporaryFile() as ovpn:
+            # Write the configuration to a file
+            ovpn.write(self.cnxn.lab.config)
+
+            # Import the connection w/ Network Manager
+            p = subprocess.run(
+                ["nmcli", "c", "import", "type", "openvpn", "file", ovpn.name],
+                capture_output=True,
+            )
+            if p.returncode != 0:
+                self.perror("[!] failed to import vpn configuration")
+                return
+
+        # Parse the UUID out of the output
+        uuid = p.stdout.split(b"(")[1].split(b")")[0].decode("utf-8")
+        self.poutput(f"[+] imported vpn configuration w/ uuid {uuid}")
+
+        # Grab the connection object
+        connection = NetworkManager.Settings.GetConnectionByUuid(uuid)
+
+        # Ensure the routing settings are correct
+        connection_settings = connection.GetSettings()
+        connection_settings["connection"]["id"] = args.name
+        connection_settings["ipv4"]["never-default"] = True
+        connection_settings["ipv6"]["never-default"] = True
+        connection.Update(connection_settings)
+
+        # Save the uuid in our configuration file
+        self.config["lab"] = {}
+        self.config["lab"]["connection"] = uuid
+        with open(self.config_path, "w") as f:
+            self.config.write(f)
+
+        self.poutput("[+] vpn configuration imported successfully")
 
     @cmd2.with_category("Hack the Box")
     def do_invalidate(self, args) -> None:

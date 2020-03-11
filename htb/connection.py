@@ -48,7 +48,7 @@ class Connection(object):
         """ Send an API requests with the stored API key """
 
         # If requested, attempt to cache the response for up to `self.cache_timeout` seconds
-        if cache and  endpoint in self._cache and method in self._cache[endpoint]:
+        if cache and endpoint in self._cache and method in self._cache[endpoint]:
             if (time.time() - self._cache[endpoint][method][0]) < self.cache_timeout:
                 return self._cache[endpoint][method][1]
 
@@ -84,7 +84,9 @@ class Connection(object):
 
         return response
 
-    def _request(self, endpoint, method, _retry_auth=True, **kwargs) -> requests.Response:
+    def _request(
+        self, endpoint, method, _retry_auth=True, **kwargs
+    ) -> requests.Response:
         """ Make a standard (non-api) request. May require authentication prior,
         but in order to authenticate, the connection must have been given
         credentials beyond the required auth token. """
@@ -100,7 +102,9 @@ class Connection(object):
 
         # Send request
         r = methods[method](
-            f"{Connection.BASE_URL}/{endpoint.lstrip('/')}", allow_redirects=False, **kwargs
+            f"{Connection.BASE_URL}/{endpoint.lstrip('/')}",
+            allow_redirects=False,
+            **kwargs,
         )
 
         if r.status_code == 302:
@@ -111,7 +115,6 @@ class Connection(object):
                 raise AuthFailure
 
         return r
-
 
     def _authenticate(self) -> None:
         """ Check that the provided API key is valid and query user details """
@@ -145,7 +148,6 @@ class Connection(object):
                 or r.headers["location"] != "https://www.hackthebox.eu/home"
             ):
                 raise AuthFailure
-
 
     @property
     def lab(self) -> VPN:

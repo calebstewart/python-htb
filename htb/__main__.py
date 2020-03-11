@@ -5,12 +5,14 @@ from cmd2.argparse_custom import Cmd2ArgumentParser
 import configparser
 from colorama import Fore, Style, Back
 import argparse
+import os.path
 import shlex
 import sys
 import os
 
 from htb import Connection, Machine, VPN
 from htb.exceptions import RequestFailed, AuthFailure
+import htb.scanner
 
 
 class HackTheBox(Cmd):
@@ -65,6 +67,7 @@ class HackTheBox(Cmd):
             "info": self._machine_info,
             "cancel": self._machine_cancel,
             "reset": self._machine_reset,
+            "init": self._machine_init,
         }
         actions[args.action](args)
         return False
@@ -248,33 +251,45 @@ class HackTheBox(Cmd):
     machine_stop_parser = machine_subparsers.add_parser(
         "stop", aliases=["down", "shutdown"], help="Stop a machine", prog="machine down"
     )
-    machine_stop_parser.add_argument(
-        "machine", help="A name regex, IP address or machine ID to start"
+    machine_stop_group = machine_stop_parser.add_mutually_exclusive_group(required=True)
+    machine_stop_group.add_argument(
+        "--assigned",
+        "-a",
+        action="store_true",
+        help="Perform action on the currently assigned machine",
+        default=False,
+    )
+    machine_stop_group.add_argument(
+        "machine", nargs="?", help="A name regex, IP address or machine ID to start",
     )
     machine_stop_parser.set_defaults(action="stop")
 
     def _machine_stop(self, args: argparse.Namespace) -> None:
         """ Stop an active machine """
 
-        # Convert to integer, if possible. Otherwise pass as-is
-        try:
-            machine_id = int(args.machine)
-        except:
-            machine_id = args.machine
+        if args.assigned:
+            m = self.cnxn.assigned
+            if m is None:
+                self.perror(f"[!] no currently assigned machine")
+                return
+        else:
+            # Convert to integer, if possible. Otherwise pass as-is
+            try:
+                machine_id = int(args.machine)
+            except:
+                machine_id = args.machine
 
-        m = self.cnxn[machine_id]
-        a = self.cnxn.assigned
-
-        if m is None:
-            self.perror(f"[!] {machine_id}: no such machine")
-            return
+            try:
+                m = self.cnxn[machine_id]
+            except KeyError:
+                self.perror(f"[!] {machine_id}: no such machine")
 
         if not m.spawned:
             self.poutput(f"[+] {m.name} is not running")
             return
 
         self.poutput(f"[+] scheduling termination for {m.name}")
-        m.spawned = True
+        m.spawned = False
 
     machine_info_parser = machine_subparsers.add_parser(
         "info",
@@ -282,8 +297,16 @@ class HackTheBox(Cmd):
         help="Show detailed machine information",
         prog="machine info",
     )
-    machine_info_parser.add_argument(
-        "machine", help="A name regex, IP address or machine ID to show"
+    machine_info_group = machine_info_parser.add_mutually_exclusive_group(required=True)
+    machine_info_group.add_argument(
+        "--assigned",
+        "-a",
+        action="store_true",
+        help="Perform action on the currently assigned machine",
+        default=False,
+    )
+    machine_info_group.add_argument(
+        "machine", nargs="?", help="A name regex, IP address or machine ID",
     )
     machine_info_parser.set_defaults(action="info")
 
@@ -295,15 +318,22 @@ class HackTheBox(Cmd):
             research some other python modules that may be able to help
         """
 
-        try:
-            machine_id = int(args.machine)
-        except:
-            machine_id = args.machine
+        if args.assigned:
+            m = self.cnxn.assigned
+            if m is None:
+                self.perror(f"[!] no currently assigned machine")
+                return
+        else:
+            # Convert to integer, if possible. Otherwise pass as-is
+            try:
+                machine_id = int(args.machine)
+            except:
+                machine_id = args.machine
 
-        try:
-            m = self.cnxn[args.machine]
-        except KeyError:
-            self.perror(f"[!] {machine_id}: no such machine")
+            try:
+                m = self.cnxn[machine_id]
+            except KeyError:
+                self.perror(f"[!] {machine_id}: no such machine")
 
         if m.spawned and not m.resetting and not m.terminating:
             state = f"{Fore.GREEN}up{Fore.RESET} for {m.expires}"
@@ -425,8 +455,16 @@ class HackTheBox(Cmd):
         choices=range(1, 100),
         help="Difficulty Rating (1-100)",
     )
-    machine_own_parser.add_argument(
-        "machine", help="A name regex, IP address or machine ID to start"
+    machine_own_group = machine_own_parser.add_mutually_exclusive_group(required=True)
+    machine_own_group.add_argument(
+        "--assigned",
+        "-a",
+        action="store_true",
+        help="Perform action on the currently assigned machine",
+        default=False,
+    )
+    machine_own_group.add_argument(
+        "machine", nargs="?", help="A name regex, IP address or machine ID",
     )
     machine_own_parser.add_argument("flag", help="The user or root flag")
     machine_own_parser.set_defaults(action="own")
@@ -434,16 +472,22 @@ class HackTheBox(Cmd):
     def _machine_own(self, args: argparse.Namespace) -> None:
         """ Submit a machine own (user or root) """
 
-        try:
-            machine_id = int(args.machine)
-        except:
-            machine_id = args.machine
+        if args.assigned:
+            m = self.cnxn.assigned
+            if m is None:
+                self.perror(f"[!] no currently assigned machine")
+                return
+        else:
+            # Convert to integer, if possible. Otherwise pass as-is
+            try:
+                machine_id = int(args.machine)
+            except:
+                machine_id = args.machine
 
-        try:
-            m = self.cnxn[machine_id]
-        except KeyError:
-            self.perror(f"[!] {machine_id}: no such machine")
-            return
+            try:
+                m = self.cnxn[machine_id]
+            except KeyError:
+                self.perror(f"[!] {machine_id}: no such machine")
 
         if m.submit(args.flag, difficulty=args.rate):
             self.poutput(f"[+] correct flag for {m.Name}!")
@@ -472,31 +516,47 @@ class HackTheBox(Cmd):
         help="Cancel a machine reset",
     )
     machine_cancel_parser.add_argument(
-        "--all",
-        "-a",
+        "--both",
+        "-b",
         action="store_const",
         const=[],
         dest="cancel",
         help="Cancel machine reset and termination",
     )
-    machine_cancel_parser.add_argument(
-        "machine", help="A name regex, IP address or machine ID"
+    machine_cancel_group = machine_cancel_parser.add_mutually_exclusive_group(
+        required=True
+    )
+    machine_cancel_group.add_argument(
+        "--assigned",
+        "-a",
+        action="store_true",
+        help="Perform action on the currently assigned machine",
+        default=False,
+    )
+    machine_cancel_group.add_argument(
+        "machine", nargs="?", help="A name regex, IP address or machine ID",
     )
     machine_cancel_parser.set_defaults(action="cancel", cancel=[])
 
     def _machine_cancel(self, args: argparse.Namespace) -> None:
         """ Cancel pending termination or reset """
 
-        try:
-            machine_id = int(args.machine)
-        except:
-            machine_id = args.machine
+        if args.assigned:
+            m = self.cnxn.assigned
+            if m is None:
+                self.perror(f"[!] no currently assigned machine")
+                return
+        else:
+            # Convert to integer, if possible. Otherwise pass as-is
+            try:
+                machine_id = int(args.machine)
+            except:
+                machine_id = args.machine
 
-        try:
-            m = self.cnxn[machine_id]
-        except:
-            self.perror(f"[!] {machine_id}: no such machine")
-            return
+            try:
+                m = self.cnxn[machine_id]
+            except KeyError:
+                self.perror(f"[!] {machine_id}: no such machine")
 
         if len(args.cancel) == 0 or "t" in args.cancel:
             if m.terminating:
@@ -506,6 +566,113 @@ class HackTheBox(Cmd):
             if m.resetting:
                 m.resetting = False
                 self.poutput(f"[+] {m.name}: pending reset cancelled")
+
+    machine_init_parser = machine_subparsers.add_parser(
+        "init", help="Perform intiial preliminary scans on host", prog="machine init"
+    )
+    machine_init_parser.add_argument(
+        "--path",
+        "-p",
+        type=str,
+        default=None,
+        help="Location to build analysis directory (default: ./{machine-name}.{tld}",
+    )
+    machine_init_parser.add_argument(
+        "--tld",
+        "-t",
+        type=str,
+        default="htb",
+        help="The Top-Level Domain (TLD) to use in the /etc/hosts file (default: htb)",
+    )
+    machine_init_group = machine_init_parser.add_mutually_exclusive_group(required=True)
+    machine_init_group.add_argument(
+        "--assigned",
+        "-a",
+        action="store_true",
+        help="Perform action on the currently assigned machine",
+        default=False,
+    )
+    machine_init_group.add_argument(
+        "machine", nargs="?", help="A name regex, IP address or machine ID to start",
+    )
+    machine_init_parser.set_defaults(action="init")
+
+    def _machine_init(self, args: argparse.Namespace) -> None:
+        """ Initialize a directory structure for starting analysis of a machine, and
+        kick-off preliminary scans """
+
+        # Use the assigned machine if requested
+        if args.assigned:
+            m = self.cnxn.assigned
+            if m is None:
+                self.perror(f"[!] no currently assigned machine")
+                return
+        else:
+            # Convert to integer, if possible. Otherwise pass as-is
+            try:
+                machine_id = int(args.machine)
+            except:
+                machine_id = args.machine
+
+            # Lookup the given machine id
+            try:
+                m = self.cnxn[machine_id]
+            except KeyError:
+                self.perror(f"[!] {machine_id}: no such machine")
+                return
+
+        # Build path if not specified
+        if args.path is None:
+            args.path = f"./{m.name.lower()}.{args.tld}"
+
+        # Expand `~` in the path
+        args.path = os.path.expanduser(args.path)
+
+        # Ensure the directory doesn't exist yet
+        if os.path.exists(args.path):
+            self.perror(f"[!] {args.path}: directory exists")
+            return
+
+        self.poutput("[+] creating analysis directory tree")
+
+        # Get full path
+        args.path = os.path.abspath(args.path)
+
+        # Create the directory
+        self.poutput(f"  {args.path}")
+        os.mkdir(args.path)
+
+        # Create directory tree
+        self.poutput(f"  {os.path.join(args.path, 'scans')}")
+        os.makedirs(os.path.join(args.path, "scans"))
+        self.poutput(f"  {os.path.join(args.path, 'artifacts')}")
+        os.makedirs(os.path.join(args.path, "artifacts"))
+        self.poutput(f"  {os.path.join(args.path, 'exploits')}")
+        os.makedirs(os.path.join(args.path, "exploits"))
+        self.poutput(f"  {os.path.join(args.path, 'img')}")
+        os.makedirs(os.path.join(args.path, "img"))
+
+        # Create initial readme
+        self.poutput(f"[+] creating initial readme")
+        with open(os.path.join(args.path, "README.md"), "w") as f:
+            f.write(
+                f"""
+# Hack the Box - {m.name} - {m.ip}
+
+Preliminary scanning structure. Any completed scans are stored under `./scans`.
+"""
+            )
+
+        # Add the host to /etc/hosts
+        #   NOTE: I *really* don't like calling sudo like this...
+        self.poutput(f"[+] adding {m.name.lower()}.{args.tld} to /etc/hosts")
+        line = f"\\n{m.ip}\\t{m.name.lower()}.{args.tld}\\n"
+        line = f"echo {shlex.quote(line)} >> /etc/hosts"
+        os.system(f"sudo /bin/sh -c {shlex.quote(line)}")
+
+        # Perform initial scans
+        self.poutput(f"[+] starting preliminary scanners")
+        htb.scanner.scan(self, args.path, f"{m.name.lower()}.{args.tld}", m)
 
     # Argument parser for `machine` command
     lab_parser = Cmd2ArgumentParser(description="View and manage lab VPN connection")

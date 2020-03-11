@@ -2,6 +2,16 @@
 
 A Python3 API for interacting with the Hack the Box platform.
 
+## Fancy Showcase
+
+Because a README doesn't do it justice, I recorded an `asciinema` of a small
+subset of the functionality. You can see the output of the `machine info`
+command and the automatic enumeration command `machine init`. The graphs don't
+quite render properly in asciinema, but it should give you an idea of how the
+tool works :)
+
+[Asciinema Showcase](https://asciinema.org/a/hQbKBl3zbAYlNtpWQa2czyrff)
+
 ## Features
 
 - Connect to hack the box with `api_token` with an optional connection with
@@ -15,6 +25,8 @@ A Python3 API for interacting with the Hack the Box platform.
 - Cancel termination or reset of machines
 - Send messages to the Shoutbox (including `/{command}` commands)
 - Command line interface
+- Automatically build analysis directory structure and start basic
+  enumeration/scans.
 
 ## Example Command Line Usage
 

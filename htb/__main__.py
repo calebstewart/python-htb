@@ -667,7 +667,7 @@ Preliminary scanning structure. Any completed scans are stored under `./scans`.
         #   NOTE: I *really* don't like calling sudo like this...
         self.poutput(f"[+] adding {m.name.lower()}.{args.tld} to /etc/hosts")
         line = f"\\n{m.ip}\\t{m.name.lower()}.{args.tld}\\n"
-        line = f"echo {shlex.quote(line)} >> /etc/hosts"
+        line = f"echo -e {shlex.quote(line)} >> /etc/hosts"
         os.system(f"sudo /bin/sh -c {shlex.quote(line)}")
 
         # Perform initial scans

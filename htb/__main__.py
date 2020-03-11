@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+from typing import Any
 import cmd2
 from cmd2 import Cmd
 from cmd2.argparse_custom import Cmd2ArgumentParser
@@ -53,7 +54,37 @@ class HackTheBox(Cmd):
             api_token=api_token, email=email, password=password
         )
 
-        self.prompt = "htb ➜ "
+        self.prompt = (
+            f"{Fore.CYAN}htb{Fore.RESET} {Style.BRIGHT+Fore.GREEN}➜{Style.RESET_ALL} "
+        )
+
+    def poutput(self, msg: Any = "", end: str = "\n", apply_style: bool = True) -> None:
+        if apply_style:
+            msg = f"[{Style.BRIGHT+Fore.BLUE}-{Style.RESET_ALL}] {msg}"
+        super(HackTheBox, self).poutput(msg, end=end)
+
+    def psuccess(
+        self, msg: Any = "", end: str = "\n", apply_style: bool = True
+    ) -> None:
+        if apply_style:
+            msg = f"[{Style.BRIGHT+Fore.GREEN}+{Style.RESET_ALL}] {msg}"
+        super(HackTheBox, self).poutput(msg, end=end)
+
+    def pwarning(
+        self, msg: Any = "", end: str = "\n", apply_style: bool = True
+    ) -> None:
+        if apply_style:
+            msg = f"[{Style.BRIGHT+Fore.YELLOW}?{Style.RESET_ALL}] {msg}"
+        super(HackTheBox, self).pwarning(
+            msg, end=end, apply_style=False,
+        )
+
+    def perror(self, msg: Any = "", end: str = "\n", apply_style: bool = True) -> None:
+        if apply_style:
+            msg = f"[{Style.BRIGHT+Fore.RED}!{Style.RESET_ALL}] {msg}"
+        super(HackTheBox, self).perror(
+            msg, end=end, apply_style=False,
+        )
 
     # Argument parser for `machine` command
     machine_parser = Cmd2ArgumentParser(
@@ -211,18 +242,18 @@ class HackTheBox(Cmd):
         a = self.cnxn.assigned
 
         if a is not None and a.name != m.name:
-            self.perror(f"[!] {a.name} already assigned to you")
+            self.perror(f"{a.name} already assigned to you")
             return
 
         if m is None:
-            self.perror(f"[!] {machine_id}: no such machine")
+            self.perror(f"{machine_id}: no such machine")
             return
 
         if m.spawned:
-            self.poutput(f"[+] {m.name}: already running. did you mean 'transfer'?")
+            self.poutput(f"{m.name}: already running. did you mean 'transfer'?")
             return
 
-        self.poutput(f"[+] starting {m.name}")
+        self.psuccess(f"starting {m.name}")
         m.spawned = True
 
     machine_reset_parser = machine_subparsers.add_parser(
@@ -247,14 +278,14 @@ class HackTheBox(Cmd):
 
         m = self.cnxn[machine_id]
         if m is None:
-            self.perror(f"[!] {machine_id}: no such machine")
+            self.perror(f"{machine_id}: no such machine")
             return
 
         if not m.spawned:
-            self.poutput(f"[+] {m.name}: not running")
+            self.poutput(f"{m.name}: not running")
             return
 
-        self.poutput(f"[+] {m.name}: scheduling reset")
+        self.success(f"{m.name}: scheduling reset")
         m.resetting = True
 
     machine_stop_parser = machine_subparsers.add_parser(
@@ -279,7 +310,7 @@ class HackTheBox(Cmd):
         if args.assigned:
             m = self.cnxn.assigned
             if m is None:
-                self.perror(f"[!] no currently assigned machine")
+                self.perror(f"no currently assigned machine")
                 return
         else:
             # Convert to integer, if possible. Otherwise pass as-is
@@ -291,13 +322,14 @@ class HackTheBox(Cmd):
             try:
                 m = self.cnxn[machine_id]
             except KeyError:
-                self.perror(f"[!] {machine_id}: no such machine")
+                self.perror(f"{machine_id}: no such machine")
+                return
 
         if not m.spawned:
-            self.poutput(f"[+] {m.name} is not running")
+            self.poutput(f"{m.name} is not running")
             return
 
-        self.poutput(f"[+] scheduling termination for {m.name}")
+        self.psuccess(f"scheduling termination for {m.name}")
         m.spawned = False
 
     machine_info_parser = machine_subparsers.add_parser(
@@ -330,7 +362,7 @@ class HackTheBox(Cmd):
         if args.assigned:
             m = self.cnxn.assigned
             if m is None:
-                self.perror(f"[!] no currently assigned machine")
+                self.perror(f"no currently assigned machine")
                 return
         else:
             # Convert to integer, if possible. Otherwise pass as-is
@@ -342,7 +374,8 @@ class HackTheBox(Cmd):
             try:
                 m = self.cnxn[machine_id]
             except KeyError:
-                self.perror(f"[!] {machine_id}: no such machine")
+                self.perror(f"{machine_id}: no such machine")
+                return
 
         if m.spawned and not m.resetting and not m.terminating:
             state = f"{Fore.GREEN}up{Fore.RESET} for {m.expires}"
@@ -484,7 +517,7 @@ class HackTheBox(Cmd):
         if args.assigned:
             m = self.cnxn.assigned
             if m is None:
-                self.perror(f"[!] no currently assigned machine")
+                self.perror(f"no currently assigned machine")
                 return
         else:
             # Convert to integer, if possible. Otherwise pass as-is
@@ -496,12 +529,13 @@ class HackTheBox(Cmd):
             try:
                 m = self.cnxn[machine_id]
             except KeyError:
-                self.perror(f"[!] {machine_id}: no such machine")
+                self.perror(f"{machine_id}: no such machine")
+                return
 
         if m.submit(args.flag, difficulty=args.rate):
-            self.poutput(f"[+] correct flag for {m.Name}!")
+            self.psuccess(f"correct flag for {m.Name}!")
         else:
-            self.poutput(f"[-] incorrect flag")
+            self.perror(f"incorrect flag")
 
     machine_cancel_parser = machine_subparsers.add_parser(
         "cancel",
@@ -553,7 +587,7 @@ class HackTheBox(Cmd):
         if args.assigned:
             m = self.cnxn.assigned
             if m is None:
-                self.perror(f"[!] no currently assigned machine")
+                self.perror(f"no currently assigned machine")
                 return
         else:
             # Convert to integer, if possible. Otherwise pass as-is
@@ -565,16 +599,17 @@ class HackTheBox(Cmd):
             try:
                 m = self.cnxn[machine_id]
             except KeyError:
-                self.perror(f"[!] {machine_id}: no such machine")
+                self.perror(f"{machine_id}: no such machine")
+                return
 
         if len(args.cancel) == 0 or "t" in args.cancel:
             if m.terminating:
                 m.terminating = False
-                self.poutput(f"[+] {m.name}: pending terminating cancelled")
+                self.psuccess(f"{m.name}: pending termination cancelled")
         if len(args.cancel) == 0 or "r" in args.cancel:
             if m.resetting:
                 m.resetting = False
-                self.poutput(f"[+] {m.name}: pending reset cancelled")
+                self.psuccess(f"{m.name}: pending reset cancelled")
 
     machine_init_parser = machine_subparsers.add_parser(
         "init", help="Perform intiial preliminary scans on host", prog="machine init"
@@ -614,7 +649,7 @@ class HackTheBox(Cmd):
         if args.assigned:
             m = self.cnxn.assigned
             if m is None:
-                self.perror(f"[!] no currently assigned machine")
+                self.perror(f"no currently assigned machine")
                 return
         else:
             # Convert to integer, if possible. Otherwise pass as-is
@@ -627,7 +662,7 @@ class HackTheBox(Cmd):
             try:
                 m = self.cnxn[machine_id]
             except KeyError:
-                self.perror(f"[!] {machine_id}: no such machine")
+                self.perror(f"{machine_id}: no such machine")
                 return
 
         # Build path if not specified
@@ -639,10 +674,10 @@ class HackTheBox(Cmd):
 
         # Ensure the directory doesn't exist yet
         if os.path.exists(args.path):
-            self.perror(f"[!] {args.path}: directory exists")
+            self.perror(f"{args.path}: directory exists")
             return
 
-        self.poutput("[+] creating analysis directory tree")
+        self.poutput("creating analysis directory tree")
 
         # Get full path
         args.path = os.path.abspath(args.path)
@@ -662,7 +697,7 @@ class HackTheBox(Cmd):
         os.makedirs(os.path.join(args.path, "img"))
 
         # Create initial readme
-        self.poutput(f"[+] creating initial readme")
+        self.poutput(f"creating initial readme")
         with open(os.path.join(args.path, "README.md"), "w") as f:
             f.write(
                 f"""
@@ -674,13 +709,13 @@ Preliminary scanning structure. Any completed scans are stored under `./scans`.
 
         # Add the host to /etc/hosts
         #   NOTE: I *really* don't like calling sudo like this...
-        self.poutput(f"[+] adding {m.name.lower()}.{args.tld} to /etc/hosts")
+        self.poutput(f"adding {m.name.lower()}.{args.tld} to /etc/hosts")
         line = f"\\n{m.ip}\\t{m.name.lower()}.{args.tld}\\n"
         line = f"echo -e {shlex.quote(line)} >> /etc/hosts"
         os.system(f"sudo /bin/sh -c {shlex.quote(line)}")
 
         # Perform initial scans
-        self.poutput(f"[+] starting preliminary scanners")
+        self.poutput(f"starting preliminary scanners")
         htb.scanner.scan(self, args.path, f"{m.name.lower()}.{args.tld}", m)
 
     # Argument parser for `machine` command
@@ -758,9 +793,9 @@ Preliminary scanning structure. Any completed scans are stored under `./scans`.
         try:
             self.cnxn.lab.switch(args.lab)
         except RequestFailed as e:
-            self.perror(f"[!] failed to switch: {e}")
+            self.perror(f"failed to switch: {e}")
         else:
-            self.poutput(f"[+] lab switched to {args.lab}")
+            self.psuccess(f"lab switched to {args.lab}")
 
     lab_config_parser = lab_subparsers.add_parser(
         "config", description="Download OVPN configuration file", prog="lab config",
@@ -770,9 +805,9 @@ Preliminary scanning structure. Any completed scans are stored under `./scans`.
     def _lab_config(self, args: argparse.Namespace) -> None:
         """ Download OVPN configuration file """
         try:
-            self.poutput(self.cnxn.lab.config.decode("utf-8"))
+            self.poutput(self.cnxn.lab.config.decode("utf-8"), apply_style=False)
         except AuthFailure:
-            self.perror("[!] authentication failure (did you supply email/password?)")
+            self.perror("authentication failure (did you supply email/password?)")
 
     lab_connect_parser = lab_subparsers.add_parser(
         "connect",
@@ -802,12 +837,12 @@ Preliminary scanning structure. Any completed scans are stored under `./scans`.
                     capture_output=True,
                 )
                 if p.returncode != 0:
-                    self.perror("[!] failed to import vpn configuration")
+                    self.perror("failed to import vpn configuration")
                     return
 
             # Parse the UUID out of the output
             uuid = p.stdout.split(b"(")[1].split(b")")[0].decode("utf-8")
-            self.poutput(f"[+] imported vpn configuration w/ uuid {uuid}")
+            self.psuccess(f"imported vpn configuration w/ uuid {uuid}")
 
             # Save the uuid in our configuration file
             self.config["lab"] = {}
@@ -833,14 +868,14 @@ Preliminary scanning structure. Any completed scans are stored under `./scans`.
             connection = NetworkManager.Settings.GetConnectionByUuid(uuid)
             if connection is None:
                 self.perror(
-                    "[!] vpn configuration not found (hint: try 'lab import --reload')"
+                    "vpn configuration not found (hint: try 'lab import --reload')"
                 )
                 return
 
         # Check if this connection is active on any devices
         for active_connection in NetworkManager.NetworkManager.ActiveConnections:
             if active_connection.Uuid == uuid:
-                self.poutput(f"[+] vpn connection already active")
+                self.poutput(f"vpn connection already active")
                 return
 
         # Activate the connection
@@ -857,14 +892,14 @@ Preliminary scanning structure. Any completed scans are stored under `./scans`.
                         connection, device, "/"
                     )
                     if active_connection is None:
-                        self.perror("[!] failed to activate vpn connection")
+                        self.perror("failed to activate vpn connection")
                         return
                 except dbus.exceptions.DBusException:
                     continue
                 else:
                     break
         else:
-            self.perror("[!] vpn connection failed")
+            self.perror("vpn connection failed")
             return
 
         # Wait for VPN to become active or transition to failed
@@ -878,11 +913,11 @@ Preliminary scanning structure. Any completed scans are stored under `./scans`.
             active_connection.VpnState
             != NetworkManager.NM_VPN_CONNECTION_STATE_ACTIVATED
         ):
-            self.perror("[!] vpn connection failed")
+            self.perror("vpn connection failed")
             return
 
-        self.poutput(
-            f"[+] connected w/ ipv4 address: {active_connection.Ip4Config.Addresses[0][0]}/{active_connection.Ip4Config.Addresses[0][1]}"
+        self.psuccess(
+            f"connected w/ ipv4 address: {active_connection.Ip4Config.Addresses[0][0]}/{active_connection.Ip4Config.Addresses[0][1]}"
         )
 
     lab_disconnect_parser = lab_subparsers.add_parser(
@@ -896,18 +931,16 @@ Preliminary scanning structure. Any completed scans are stored under `./scans`.
         """ Disconnect from Hack the Box VPN via Network Manager """
 
         if "lab" not in self.config or "connection" not in self.config["lab"]:
-            self.perror(
-                '[!] lab vpn configuration not imported (hint: use "lab import")'
-            )
+            self.perror('lab vpn configuration not imported (hint: use "lab import")')
             return
 
         for c in NetworkManager.NetworkManager.ActiveConnections:
             if c.Uuid == self.config["lab"]["connection"]:
                 NetworkManager.NetworkManager.DeactivateConnection(c)
-                self.poutput("[+] vpn connection deactivated")
+                self.psuccess("vpn connection deactivated")
                 break
         else:
-            self.poutput("[!] vpn connection not active")
+            self.poutput("vpn connection not active")
 
     lab_import_parser = lab_subparsers.add_parser(
         "import",
@@ -932,7 +965,7 @@ Preliminary scanning structure. Any completed scans are stored under `./scans`.
         if "lab" in self.config and "connection" in self.config["lab"]:
             # Only reload if asked
             if not args.reload:
-                self.poutput("[!] vpn configuration already imported")
+                self.poutput("vpn configuration already imported")
                 return
 
             # Grab the connection
@@ -941,7 +974,7 @@ Preliminary scanning structure. Any completed scans are stored under `./scans`.
             )
             if c is None:
                 # This is weird... The user must have removed it manually
-                self.pwarning("[!] invalid uuid found in config")
+                self.pwarning("invalid uuid found in config")
             else:
                 # Delete the connection
                 c.Delete()
@@ -957,12 +990,11 @@ Preliminary scanning structure. Any completed scans are stored under `./scans`.
                 capture_output=True,
             )
             if p.returncode != 0:
-                self.perror("[!] failed to import vpn configuration")
+                self.perror("failed to import vpn configuration")
                 return
 
         # Parse the UUID out of the output
         uuid = p.stdout.split(b"(")[1].split(b")")[0].decode("utf-8")
-        self.poutput(f"[+] imported vpn configuration w/ uuid {uuid}")
 
         # Grab the connection object
         connection = NetworkManager.Settings.GetConnectionByUuid(uuid)
@@ -980,7 +1012,7 @@ Preliminary scanning structure. Any completed scans are stored under `./scans`.
         with open(self.config_path, "w") as f:
             self.config.write(f)
 
-        self.poutput("[+] vpn configuration imported successfully")
+        self.psuccess(f"imported vpn configuration w/ uuid {uuid}")
 
     @cmd2.with_category("Hack the Box")
     def do_invalidate(self, args) -> None:

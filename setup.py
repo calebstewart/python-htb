@@ -10,6 +10,7 @@ dependencies = [
     "cmd2",
     "pygments",
     "regex",
+    "python-networkmanager",
 ]
 
 dependency_links = []
@@ -27,4 +28,3 @@ setup(
     install_requires=dependencies,
     dependency_links=dependency_links,
 )
-

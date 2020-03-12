@@ -24,6 +24,15 @@ import htb.scanner
 class HackTheBox(Cmd):
     """ Hack the Box Command Line Interface """
 
+    OS_ICONS = {
+        "freebsd": "\uf3a4",
+        "windows": "\uf17a",
+        "linux": "\uf17c",
+        "android": "\uf17b",
+        "solaris": "\uf185",
+        "other": "\uf233",
+    }
+
     def __init__(self, resource="~/.htbrc", *args, **kwargs):
         super(HackTheBox, self).__init__(*args, **kwargs)
 
@@ -391,9 +400,14 @@ class HackTheBox(Cmd):
         else:
             retiree = f"{Fore.GREEN}active{Fore.RESET}"
 
+        try:
+            os_icon = HackTheBox.OS_ICONS[m.os.lower()]
+        except KeyError:
+            os_icon = HackTheBox.OS_ICONS["other"]
+
         output = []
         output.append(
-            f"{Style.BRIGHT}{Fore.GREEN}{m.name}{Fore.RESET} - {Style.RESET_ALL}{m.ip}{Style.BRIGHT} - {Fore.CYAN}{m.os}{Fore.RESET} - {Fore.MAGENTA}{m.points}{Fore.RESET} points - {state}"
+            f"{Style.BRIGHT}{Fore.GREEN}{m.name}{Fore.RESET} - {Style.RESET_ALL}{m.ip}{Style.BRIGHT} - {Style.RESET_ALL}{os_icon}{Style.BRIGHT} {Fore.CYAN}{m.os}{Fore.RESET} - {Fore.MAGENTA}{m.points}{Fore.RESET} points - {state}"
         )
 
         output.append("")
@@ -435,7 +449,7 @@ class HackTheBox(Cmd):
             f"{Style.BRIGHT}Rating Matrix ({Fore.CYAN}maker{Fore.RESET}, {Style.DIM}{Fore.GREEN}user{Style.RESET_ALL}{Style.BRIGHT}){Style.RESET_ALL}"
         )
         output.extend(["", "", "", "", ""])
-        column_widths = [6, 8, 6, 10, 6]
+        column_widths = [6, 8, 6, 8, 6]
 
         for i in range(5):
             for row in range(5):
@@ -464,7 +478,7 @@ class HackTheBox(Cmd):
                 output[-1 - row] += content
 
         output.append(
-            f"{'Enum':^{column_widths[0]}}{'R-Life':^{column_widths[1]}}{'CVE':^{column_widths[2]}}{'Exploit':^{column_widths[3]}}{'CTF':^{column_widths[4]}}"
+            f"{'Enum':^{column_widths[0]}}{'R-Life':^{column_widths[1]}}{'CVE':^{column_widths[2]}}{'Custom':^{column_widths[3]}}{'CTF':^{column_widths[4]}}"
         )
 
         output.append("")

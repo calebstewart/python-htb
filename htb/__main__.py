@@ -17,7 +17,12 @@ import sys
 import os
 
 from htb import Connection, Machine, VPN
-from htb.exceptions import RequestFailed, AuthFailure
+from htb.exceptions import (
+    RequestFailed,
+    AuthFailure,
+    ConnectionNotFound,
+    InvalidConnectionID,
+)
 import htb.scanner
 
 
@@ -839,52 +844,11 @@ Preliminary scanning structure. Any completed scans are stored under `./scans`.
     def _lab_connect(self, args: argparse.Namespace) -> None:
         """ Connect to the Hack the Box VPN using NetworkManager """
 
-        if "lab" not in self.config or "connection" not in self.config["lab"]:
-            # We need to download and import the OVPN configuration file
-            with tempfile.NamedTemporaryFile() as ovpn:
-                # Write the configuration to a file
-                ovpn.write(self.cnxn.lab.config)
-
-                # Import the connection w/ Network Manager
-                p = subprocess.run(
-                    ["nmcli", "c", "import", "type", "openvpn", "file", ovpn.name],
-                    capture_output=True,
-                )
-                if p.returncode != 0:
-                    self.perror("failed to import vpn configuration")
-                    return
-
-            # Parse the UUID out of the output
-            uuid = p.stdout.split(b"(")[1].split(b")")[0].decode("utf-8")
-            self.psuccess(f"imported vpn configuration w/ uuid {uuid}")
-
-            # Save the uuid in our configuration file
-            self.config["lab"] = {}
-            self.config["lab"]["connection"] = uuid
-            with open(self.config_path, "w") as f:
-                self.config.write(f)
-
-            # Grab the connection object
-            connection = NetworkManager.Settings.GetConnectionByUuid(uuid)
-
-            # Ensure the routing settings are correct
-            connection_settings = connection.GetSettings()
-            connection_settings["connection"]["id"] = "python-htb"
-            connection_settings["ipv4"]["never-default"] = True
-            connection_settings["ipv6"]["never-default"] = True
-            connection.Update(connection_settings)
-
-        else:
-            # Grab the UUID from the previously loaded configuration
-            uuid = self.config["lab"]["connection"]
-
-            # Grab the connection object
-            connection = NetworkManager.Settings.GetConnectionByUuid(uuid)
-            if connection is None:
-                self.perror(
-                    "vpn configuration not found (hint: try 'lab import --reload')"
-                )
-                return
+        # Attempt to grab the VPN if it exists, and import it if it doesn't
+        connection, uuid = self._nm_import_vpn(name="python-htb", force=False)
+        if connection is None:
+            # nm_import_vpn handles error output
+            return
 
         # Check if this connection is active on any devices
         for active_connection in NetworkManager.NetworkManager.ActiveConnections:
@@ -954,7 +918,7 @@ Preliminary scanning structure. Any completed scans are stored under `./scans`.
                 self.psuccess("vpn connection deactivated")
                 break
         else:
-            self.poutput("vpn connection not active")
+            self.poutput("vpn connection not active or not found")
 
     lab_import_parser = lab_subparsers.add_parser(
         "import",
@@ -975,50 +939,74 @@ Preliminary scanning structure. Any completed scans are stored under `./scans`.
     def _lab_import(self, args: argparse.Namespace) -> None:
         """ Import OpenVPN configuration into NetworkManager """
 
-        # Have we already imported the configuration?
-        if "lab" in self.config and "connection" in self.config["lab"]:
-            # Only reload if asked
-            if not args.reload:
-                self.poutput("vpn configuration already imported")
-                return
+        # Import the connection
+        c, uuid = self._nm_import_vpn(args.name, force=args.reload)
 
-            # Grab the connection
-            c = NetworkManager.Settings.GetConnectionByUuid(
-                self.config["lab"]["connection"]
-            )
-            if c is None:
-                # This is weird... The user must have removed it manually
-                self.pwarning("invalid uuid found in config")
-            else:
-                # Delete the connection
+        # "nm_import_vpn" handles error/warning output
+        if c is None:
+            return
+
+        self.psuccess(f"imported vpn configuration w/ uuid {uuid}")
+
+    def _nm_import_vpn(self, name, force=True) -> NetworkManager.Connection:
+        """ Import the VPN configuration with the specified name """
+
+        # Ensure we aren't already managing a connection
+        try:
+            c, uuid = self._nm_get_vpn_connection()
+            if force:
                 c.Delete()
+            else:
+                return c, uuid
+        except ConnectionNotFound:
+            pass
+        except InvalidConnectionID:
+            self.pwarning("invalid connection id found in configuration; removing.")
 
         # We need to download and import the OVPN configuration file
         with tempfile.NamedTemporaryFile() as ovpn:
             # Write the configuration to a file
             ovpn.write(self.cnxn.lab.config)
 
-            # Import the connection w/ Network Manager
+            # Import the connection w/ Network Manager CLI
             p = subprocess.run(
                 ["nmcli", "c", "import", "type", "openvpn", "file", ovpn.name],
-                capture_output=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
             )
             if p.returncode != 0:
                 self.perror("failed to import vpn configuration")
-                return
+                self.perror(
+                    "tip: try importing the config manually and fixing any network manager issues:\n\tnmcli connection import type openvpn file {your-ovpn-file}"
+                )
+                self.perror("nmcli stderr output:\n" + p.stderr.decode("utf-8"))
+                return None, None
 
         # Parse the UUID out of the output
-        uuid = p.stdout.split(b"(")[1].split(b")")[0].decode("utf-8")
+        try:
+            uuid = p.stdout.split(b"(")[1].split(b")")[0].decode("utf-8")
+        except:
+            self.perror("unexpected output from nmcli")
+            self.perror(
+                "tip: try importing the config manually and fixing any network manager issues:\n\tnmcli connection import type openvpn file {your-ovpn-file}"
+            )
+            self.perror("nmcli stderr output:\n" + p.stderr.decode("utf-8"))
+            self.perror("nmcli stdout output:\n" + p.stdout.decode("utf-8"))
+            return None, None
 
-        # Grab the connection object
-        connection = NetworkManager.Settings.GetConnectionByUuid(uuid)
+        try:
+            # Grab the connection object
+            connection = NetworkManager.Settings.GetConnectionByUuid(uuid)
 
-        # Ensure the routing settings are correct
-        connection_settings = connection.GetSettings()
-        connection_settings["connection"]["id"] = args.name
-        connection_settings["ipv4"]["never-default"] = True
-        connection_settings["ipv6"]["never-default"] = True
-        connection.Update(connection_settings)
+            # Ensure the routing settings are correct
+            connection_settings = connection.GetSettings()
+            connection_settings["connection"]["id"] = name
+            connection_settings["ipv4"]["never-default"] = True
+            connection_settings["ipv6"]["never-default"] = True
+            connection.Update(connection_settings)
+        except dbus.exceptions.DBusException as e:
+            self.perror(f"dbus error during connection lookup: {e}")
+            return None, None
 
         # Save the uuid in our configuration file
         self.config["lab"] = {}
@@ -1026,7 +1014,23 @@ Preliminary scanning structure. Any completed scans are stored under `./scans`.
         with open(self.config_path, "w") as f:
             self.config.write(f)
 
-        self.psuccess(f"imported vpn configuration w/ uuid {uuid}")
+        return connection, uuid
+
+    def _nm_get_vpn_connection(self) -> NetworkManager.Connection:
+        """ Grab the NetworkManager VPN configuration object """
+
+        if "lab" not in self.config or "connection" not in self.config["lab"]:
+            raise ConnectionNotFound
+
+        try:
+            # Grab the connection
+            c = NetworkManager.Settings.GetConnectionByUuid(
+                self.config["lab"]["connection"]
+            )
+        except dbus.exceptions.DBusException as e:
+            raise InvalidConnectionID(str(e))
+
+        return c, self.config["lab"]["connection"]
 
     @cmd2.with_category("Hack the Box")
     def do_invalidate(self, args) -> None:

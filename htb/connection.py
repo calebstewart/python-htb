@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-from typing import Any, Dict, List, Union
+from typing import Any, Dict, List, Union, Callable
 import requests
 import time
 import re
 
-from htb.exceptions import AuthFailure
+from htb.exceptions import AuthFailure, TwoFactorAuthRequired
 from htb.vpn import VPN
 from htb.machine import Machine
 
@@ -14,7 +14,13 @@ class Connection(object):
 
     BASE_URL = "https://www.hackthebox.eu"
 
-    def __init__(self, api_token: str, email=None, password=None):
+    def __init__(
+        self,
+        api_token: str,
+        email=None,
+        password=None,
+        twofactor_prompt: Callable = None,
+    ):
         """ Construct a connection with the specified API key """
 
         # Save the API key
@@ -24,12 +30,12 @@ class Connection(object):
         self.email: str = email
         self.password: str = password
 
-        # Ensure we can authenticate with this api key
-        self._authenticate()
-
         # API result cache
         self._cache: Dict[str, Any] = {}
         self.cache_timeout: float = 60
+
+        # Callback to get two factor prompt
+        self.twofactor_prompt = twofactor_prompt
 
         # Ongoing session for standard authentication
         self.session = requests.Session()
@@ -149,6 +155,33 @@ class Connection(object):
             ):
                 raise AuthFailure
 
+            # Check for Two Factor Authentication
+            r = self.session.get(r.headers["location"], headers=headers)
+            if "One Time Password" not in r.text:
+                return
+
+            # Prompt for the one time password
+            token = (
+                r.text.split('id="loginForm"')[1]
+                .split('_token" value="')[1]
+                .split('"')[0]
+            )
+
+            # Request the two-factor one time passcode
+            otp = self.twofactor_prompt()
+
+            r = self.session.post(
+                f"{Connection.BASE_URL}/2fa",
+                data={"_token": token, "one_time_password": otp, "backup_code": ""},
+                allow_redirects=False,
+                headers=headers,
+            )
+            if (
+                r.status_code != 302
+                or r.headers["location"] != "https://www.hackthebox.eu/home"
+            ):
+                raise TwoFactorAuthRequired
+
     @property
     def lab(self) -> VPN:
         """ Grab the Lab VPN object """
@@ -167,38 +200,17 @@ class Connection(object):
 
         # Request all the machine information
         machines = self._api("/machines/get/all", method="get", cache=True)
-        owns = self._api("/machines/owns", method="get", cache=True)
-        difficulties = self._api("/machines/difficulty", method="get", cache=True)
-        reviews = self._api("/machines/reviews", method="get", cache=True)
-        todos = self._api("/machines/todo", method="get", cache=True)
-        expiry = self._api("/machines/expiry", method="get", cache=True)
-        spawned = self._api("/machines/spawned", method="get", cache=True)
-        terminating = self._api("/machines/terminating", method="get", cache=True)
-        assigned = self._api("/machines/assigned", method="get", cache=True)
-        resetting = self._api("/machines/resetting", method="get", cache=True)
-
-        # Create dictionary mapping machine ID to machine description
-        machines = {machine["id"]: machine for machine in machines}
-
-        # Add all the extra data to the machine dictionaries
-        for x in [
-            owns,
-            difficulties,
-            reviews,
-            todos,
-            expiry,
-            spawned,
-            terminating,
-            assigned,
-            resetting,
-        ]:
-            for y in x:
-                if isinstance(y, dict):
-                    if y["id"] in machines:
-                        machines[y["id"]].update(y)
 
         # Create machine objects for all the machine information
-        return [Machine(self, m) for ident, m in machines.items()]
+        return [Machine(self, m) for m in machines]
+
+    def get_machine(self, ident: int) -> Machine:
+        """ Lookup a machine by ID """
+
+        # request the machine
+        machine = self._api(f"/machines/get/{ident}", method="get", cache=True)
+
+        return Machine(self, machine)
 
     @property
     def active(self) -> List[Machine]:
@@ -247,7 +259,7 @@ class Connection(object):
             ]
         # Find machine based on ID
         elif isinstance(value, int):
-            m = [m for m in self.machines if m.id == value]
+            m = [self.get_machine(value)]
         else:
             # Invalid search
             raise ValueError("expected machine id or name regex")

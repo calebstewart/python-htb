@@ -7,6 +7,12 @@ class ConnectionNotFound(Exception):
     pass
 
 
+class TwoFactorAuthRequired(Exception):
+    """ During authentication, the user was prompted for 2FA. """
+
+    pass
+
+
 class InvalidConnectionID(Exception):
     """ The specified NetworkManager connection UUID doesn't exist """
 

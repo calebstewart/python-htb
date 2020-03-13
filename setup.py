@@ -10,7 +10,6 @@ dependencies = [
     "cmd2",
     "pygments",
     "regex",
-    "python-networkmanager",
     "dbus-python",
 ]
 

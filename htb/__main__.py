@@ -65,12 +65,20 @@ class HackTheBox(Cmd):
 
         # Construct the connection object
         self.cnxn: Connection = Connection(
-            api_token=api_token, email=email, password=password
+            api_token=api_token,
+            email=email,
+            password=password,
+            twofactor_prompt=self.twofactor_prompt,
         )
 
         self.prompt = (
             f"{Fore.CYAN}htb{Fore.RESET} {Style.BRIGHT+Fore.GREEN}➜{Style.RESET_ALL} "
         )
+
+    def twofactor_prompt(self) -> None:
+        self.pwarning("One Time Password: ", end="")
+        sys.stderr.flush()
+        return self.read_input("")
 
     def poutput(self, msg: Any = "", end: str = "\n", apply_style: bool = True) -> None:
         if apply_style:
@@ -105,9 +113,7 @@ class HackTheBox(Cmd):
         description="View and manage active and retired machines"
     )
     machine_parser.set_defaults(action="list")
-    machine_subparsers = machine_parser.add_subparsers(
-        help="Actions", required=False, dest="_action"
-    )
+    machine_subparsers = machine_parser.add_subparsers(help="Actions", dest="_action")
 
     @cmd2.with_argparser(machine_parser)
     @cmd2.with_category("Hack the Box")
@@ -299,7 +305,7 @@ class HackTheBox(Cmd):
             self.poutput(f"{m.name}: not running")
             return
 
-        self.success(f"{m.name}: scheduling reset")
+        self.psuccess(f"{m.name}: scheduling reset")
         m.resetting = True
 
     machine_stop_parser = machine_subparsers.add_parser(
@@ -387,8 +393,8 @@ class HackTheBox(Cmd):
 
             try:
                 m = self.cnxn[machine_id]
-            except KeyError:
-                self.perror(f"{machine_id}: no such machine")
+            except KeyError as e:
+                self.perror(f"{machine_id}: no such machine: {e}")
                 return
 
         if m.spawned and not m.resetting and not m.terminating:
@@ -753,9 +759,7 @@ Preliminary scanning structure. Any completed scans are stored under `./scans`.
     # Argument parser for `machine` command
     lab_parser = Cmd2ArgumentParser(description="View and manage lab VPN connection")
     lab_parser.set_defaults(action="status")
-    lab_subparsers = lab_parser.add_subparsers(
-        help="Actions", required=False, dest="_action"
-    )
+    lab_subparsers = lab_parser.add_subparsers(help="Actions", dest="_action")
 
     @cmd2.with_argparser(lab_parser)
     @cmd2.with_category("Hack the Box")

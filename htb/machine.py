@@ -22,64 +22,114 @@ class Machine(object):
         self.release_date: str = data["release"]
         self.retire_date: str = data["retired_date"]
         self.makers: List[Dict] = [data["maker"]]
-        self.rating: float = float(data["rating"])
+        # self.rating: float = float(data["rating"])
+        self.rating: float = 0.0
         self.user_owns: int = data["user_owns"]
         self.root_owns: int = data["root_owns"]
-        self.retired: bool = data["retired"]
-        self.free: bool = data["free"]
+        # self.retired: bool = data["retired"]
+        # self.free: bool = data["free"]
+        self.free: bool = False
 
         # May exist
         if "maker2" in data and data["maker2"] is not None:
             self.makers.append(data["maker2"])
 
-        # Other data that might exist depending on machine specifics
-        if "todo" in data:
-            self._todo: bool = data["todo"]
-        else:
-            self._todo: bool = False
-
-        if "expires_at" in data:
-            self.expires: str = data["expires_at"]
-        else:
-            self.expires: str = "N/A"
-
-        if "spawned" in data:
-            self._spawned: bool = data["spawned"]
-        else:
-            self._spawned: bool = False
-
-        if "terminating" in data:
-            self._terminating: bool = data["terminating"]
-        else:
-            self._terminating: bool = False
-
-        if "assigned" in data:
-            self._assigned: bool = data["assigned"]
-        else:
-            self._assigned: bool = False
-
-        if "resetting" in data:
-            self._resetting: bool = data["resetting"]
-        else:
-            self._resetting: bool = False
-
-        if "owned_user" in data:
-            self.owned_user: bool = data["owned_user"]
-        else:
-            self.owned_user: bool = False
-
-        if "owned_root" in data:
-            self.owned_root: bool = data["owned_root"]
-        else:
-            self.owned_root: bool = False
-
-        if "difficulty_ratings" in data:
-            self.ratings: List[int] = data["difficulty_ratings"]
-        else:
-            self.ratings: List[int] = [0] * 10
-
     def __repr__(self) -> str:
-        return f"""<Machine name="{self.name}",ip="{self.ip}",spawned={self.spawned}>"""
+        return f"""<Machine id={self.id},name="{self.name}",ip="{self.ip}",os="{self.os}">"""
+
+    @property
+    def todo(self) -> bool:
+        """ Whether this machine on the todo list """
+        todos = self.connection._api("/machines/todo", method="get", cache=True)
+        return any([t["id"] == self.id for t in todos])
+
+    @property
+    def expires(self) -> str:
+        """ The time until this machine expires """
+
+        # Grab expiration information for all machines
+        expiry = self.connection._api("/machines/expiry", method="get", cache=True)
+
+        try:
+            # Return the expire time for this machine
+            return [t["expires_at"] for t in expiry if t["id"] == self.id][0]
+        except IndexError:
+            # Or return none if it is not running/has no expiration time
+            return None
+
+    @property
+    def spawned(self) -> bool:
+        """ Whether this machine has been spawned """
+
+        spawned = self.connection._api("/machines/spawned", method="get", cache=True)
+
+        return any([s["id"] == self.id for s in spawned])
+
+    @property
+    def terminating(self) -> bool:
+        """ Whether this machine has been spawned """
+
+        terminating = self.connection._api(
+            "/machines/terminating", method="get", cache=True
+        )
+
+        return any([s["id"] == self.id for s in terminating])
+
+    @property
+    def assigned(self) -> bool:
+        """ Whether this machine is currently assigned to the logged in user """
+
+        machines = self.connection._api("/machines/assigned", method="get", cache=True)
+
+        return any([m["id"] == self.id for m in machines])
+
+    @property
+    def retired(self) -> bool:
+        """ Whether this machine is currently assigned to the logged in user """
+
+        machines = self.connection._api("/machines/get/all", method="get", cache=True)
+
+        try:
+            return [m["retired"] for m in machines if m["id"] == self.id][0]
+        except IndexError:
+            return False
+
+    @property
+    def resetting(self) -> bool:
+        """ Whether this machine has been requested to reset """
+
+        machines = self.connection._api("/machines/resetting", method="get", cache=True)
+
+        return any([m["id"] == self.id for m in machines])
+
+    @property
+    def owned_user(self) -> bool:
+        """ Whether you have owned user on this machine """
+
+        machines = self.connection._api("/machines/owns", method="get", cache=True)
+
+        return any([m["id"] == self.id and m["owned_user"] for m in machines])
+
+    @property
+    def owned_root(self) -> bool:
+        """ Whether you have owned root on this machine """
+
+        machines = self.connection._api("/machines/owns", method="get", cache=True)
+
+        return any([m["id"] == self.id and m["owned_root"] for m in machines])
+
+    @property
+    def ratings(self) -> bool:
+        """ The difficulty rating for this machine """
+
+        machines = self.connection._api(
+            "/machines/difficulty", method="get", cache=True
+        )
+
+        try:
+            return [m["difficulty_ratings"] for m in machines if m["id"] == self.id][0]
+        except IndexError:
+            return None
 
     @property
     def matrix(self) -> Dict[str, List[int]]:
@@ -98,36 +148,22 @@ class Machine(object):
         r = self.connection._api(f"/machines/get/{self.id}", method="get", cache=True)
         return {"user": r["user_blood"], "root": r["root_blood"]}
 
-    @property
-    def todo(self) -> bool:
-        return self._todo
-
     @todo.setter
     def todo(self, value: bool) -> None:
         """ Change the current todo status """
 
         # Don't do anything if it's already right
-        if self._todo == value:
+        if self.todo == value:
             return
 
         # Attempt to update todo
         r = self.connection._api(f"/machines/todo/update/{self.id}", method="post",)
 
-        # Set todo appropriately
-        self._todo = any([x["id"] == self.id and x["todo"] for x in r])
-
-    @property
-    def spawned(self) -> bool:
-        return self._spawned
-
     @spawned.setter
     def spawned(self, value: bool) -> None:
         """ Start or stop the machine """
 
-        # No change
-        if self.spawned == value:
-            return
-        elif value:
+        if value:
             action = "assign"
         else:
             action = "remove"
@@ -138,28 +174,14 @@ class Machine(object):
         if r["success"] != 1:
             raise RequestFailed(r["status"])
 
-        # Assign flags based on what we just did
-        if action == "remove":
-            self._terminating = True
-        else:
-            self._spawned = True
-            self._assigned = True
-
-    @property
-    def assigned(self) -> bool:
-        return self._assigned
-
     @assigned.setter
     def assigned(self, value: bool) -> bool:
-
-        # No action
-        if self.assigned == value:
-            return
 
         # We don't want to be the owner anymore
         if not value:
             # Trigger setter to remove the VM
             self.spawned = False
+            return
 
         # We want to transfer ownership to ourselves
         r = self.connection._api(f"/vm/vip/assign/{self.id}", method="post",)
@@ -167,20 +189,9 @@ class Machine(object):
         if r["success"] != 1:
             raise RequestFailed(r["status"])
 
-        # The machine now belongs to us
-        self._assigned = True
-
-    @property
-    def terminating(self) -> bool:
-        return self._terminating
-
     @terminating.setter
     def terminating(self, value: bool) -> None:
         """ Terminate a machine or cancel termination """
-
-        # No change
-        if self._terminating == value:
-            return
 
         # Make request
         action = "remove" if value else "cancel"
@@ -188,20 +199,9 @@ class Machine(object):
         if r["success"] != 1:
             raise RequestFailed(r["status"])
 
-        # Assign value for tracking
-        self._terminating = value
-
-    @property
-    def resetting(self) -> bool:
-        return self._resetting
-
     @resetting.setter
     def resetting(self, value: bool) -> None:
         """ Reset a machine """
-
-        # No change
-        if self._resetting == value:
-            return
 
         # Attempt the reset
         action = "/vm/reset" if value else "/machines/reset/cancel"
@@ -210,8 +210,6 @@ class Machine(object):
         # Raise exception on failure
         if r["success"] != 1:
             raise RequestFailed(r["status"])
-
-        self._resetting = value
 
     def submit(self, flag: str, difficulty: str = 50):
         """ Submit a flag for this machine """

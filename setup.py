@@ -11,9 +11,12 @@ dependencies = [
     "pygments",
     "regex",
     "python-networkmanager",
+    "dbus-python",
 ]
 
-dependency_links = []
+dependency_links = [
+    "https://github.com/calebstewart/python-networkmanager/tarball/master#egg=python-networkmanager"
+]
 
 # Setup
 setup(

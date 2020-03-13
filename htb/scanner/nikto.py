@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+import subprocess
 import shlex
 import os
 
@@ -28,9 +29,11 @@ class NiktoScanner(Scanner):
         else:
             url = f"http://{hostname}:{service.port}"
 
-        output_path = shlex.quote(os.path.join(path, "scans", "nikto.txt"))
-        url = shlex.quote(url)
+        output_path = os.path.join(path, "scans", "nikto.txt")
+        redirect = subprocess.DEVNULL if silent else None
 
-        redirect = " > /dev/null 2>&1" if silent else ""
-
-        os.system(f"nikto -host {url} -output {output_path} {redirect}")
+        subprocess.call(
+            ["nikto", "-host", url, "-output", output_path, "-ask", "no"],
+            stdout=redirect,
+            stderr=redirect,
+        )

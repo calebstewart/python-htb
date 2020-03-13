@@ -14,11 +14,18 @@ import htb.machine
 from htb.scanner.scanner import Service, Scanner
 from htb.scanner.nikto import NiktoScanner
 from htb.scanner.enum4linux import Enum4LinuxScanner
+from htb.scanner.gobuster import GobusterScanner
 
-AVAILABLE_SCANNERS = [NiktoScanner(), Enum4LinuxScanner()]
+AVAILABLE_SCANNERS = [NiktoScanner(), Enum4LinuxScanner(), GobusterScanner()]
 
 
-def scan(repl: Cmd, path: str, hostname: str, machine: htb.machine.Machine) -> None:
+def scan(
+    repl: Cmd,
+    path: str,
+    hostname: str,
+    machine: htb.machine.Machine,
+    run_recommended: bool = False,
+) -> None:
     """ Perform initial preliminary scans on the host """
 
     if not machine.spawned:
@@ -119,10 +126,27 @@ def scan(repl: Cmd, path: str, hostname: str, machine: htb.machine.Machine) -> N
     background_scanners = {}
     complete_queue = queue.Queue()
 
+    # Run all recommended scanners in the background if requested
+    for service in services:
+        for scanner in [
+            s for s in AVAILABLE_SCANNERS if s.match(service) and s.recommended
+        ]:
+            repl.pwarning(f"starting recommended scanner {scanner.name} in background")
+            handle = scanner.background(
+                complete_queue, path, hostname, machine, service
+            )
+            background_scanners[
+                f"{scanner.name}-{service.port}-{service.protocol}"
+            ] = handle
+
     # Iterate over valid services
     for service in services:
         # Iterate over matching scanners
-        for scanner in [s for s in AVAILABLE_SCANNERS if s.match(service)]:
+        for scanner in [
+            s
+            for s in AVAILABLE_SCANNERS
+            if s.match(service) and s.ident(service) not in background_scanners
+        ]:
             repl.pwarning(
                 f"run matching scanner {scanner.name} for {service.port}/{service.protocol} ({service.name})? (Y/n/b) ",
                 end="",

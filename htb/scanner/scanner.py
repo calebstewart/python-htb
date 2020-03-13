@@ -39,7 +39,12 @@ class Scanner(object):
     """ Generic service/port scanner """
 
     def __init__(
-        self, name: str, ports: List[int], regex: List[str], protocol: List[str]
+        self,
+        name: str,
+        ports: List[int],
+        regex: List[str],
+        protocol: List[str],
+        recommended=False,
     ):
         super(Scanner, self).__init__()
 
@@ -49,6 +54,11 @@ class Scanner(object):
             re.compile(p, re.IGNORECASE) for p in regex if isinstance(p, str)
         ]
         self.protocol: List[str] = protocol
+        self.recommended: bool = recommended
+
+    def ident(self, service) -> str:
+        """ Get unique identifier for this service/scanner combo """
+        return f"{self.name}-{service.port}-{service.protocol}"
 
     def match(self, service: Service) -> bool:
         """ Match this scanner to a service. Returns true if it matches """

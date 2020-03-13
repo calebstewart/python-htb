@@ -647,6 +647,13 @@ class HackTheBox(Cmd):
         default="htb",
         help="The Top-Level Domain (TLD) to use in the /etc/hosts file (default: htb)",
     )
+    machine_init_parser.add_argument(
+        "--recommended",
+        "-r",
+        action="store_true",
+        default=False,
+        help="Run recommended scans automatically in the background",
+    )
     machine_init_group = machine_init_parser.add_mutually_exclusive_group(required=True)
     machine_init_group.add_argument(
         "--assigned",
@@ -735,7 +742,13 @@ Preliminary scanning structure. Any completed scans are stored under `./scans`.
 
         # Perform initial scans
         self.poutput(f"starting preliminary scanners")
-        htb.scanner.scan(self, args.path, f"{m.name.lower()}.{args.tld}", m)
+        htb.scanner.scan(
+            self,
+            args.path,
+            f"{m.name.lower()}.{args.tld}",
+            m,
+            run_recommended=args.recommended,
+        )
 
     # Argument parser for `machine` command
     lab_parser = Cmd2ArgumentParser(description="View and manage lab VPN connection")

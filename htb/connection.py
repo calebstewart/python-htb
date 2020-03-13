@@ -19,6 +19,7 @@ class Connection(object):
         api_token: str,
         email=None,
         password=None,
+        existing_session=None,
         twofactor_prompt: Callable = None,
     ):
         """ Construct a connection with the specified API key """
@@ -39,6 +40,7 @@ class Connection(object):
 
         # Ongoing session for standard authentication
         self.session = requests.Session()
+        self.session.cookies.update({"hackthebox_session": existing_session})
 
     def invalidate_cache(self, endpoint: str = None, method: str = None) -> None:
         """ Invalidate the cache of one endpoint, endpoint/method or all entries """

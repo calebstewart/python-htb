@@ -58,6 +58,10 @@ class HackTheBox(Cmd):
         email = parser["htb"].get("email", None)
         password = parser["htb"].get("password", None)
         api_token = parser["htb"].get("api_token", None)
+        session = parser["htb"].get("session", None)
+
+        if session is not None:
+            self.pwarning("attempting to use existing session")
 
         # Ensure we have an API token
         if api_token is None:
@@ -68,6 +72,7 @@ class HackTheBox(Cmd):
             api_token=api_token,
             email=email,
             password=password,
+            existing_session=session,
             twofactor_prompt=self.twofactor_prompt,
         )
 
@@ -1068,9 +1073,15 @@ def main():
     # Run remaning arguments as a command
     if len(sys.argv) > 1:
         cmd.onecmd(" ".join([shlex.quote(x) for x in sys.argv[1:]]))
-        sys.exit(0)
+        result = 0
+    else:
+        result = cmd.cmdloop()
 
-    sys.exit(cmd.cmdloop())
+    cmd.config["htb"]["session"] = cmd.cnxn.session.cookies.get(
+        "hackthebox_session", default=None, domain="www.hackthebox.eu"
+    )
+    with open(os.path.expanduser(config), "w") as f:
+        cmd.config.write(f)
 
 
 if __name__ == "__main__":

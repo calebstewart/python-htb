@@ -1078,7 +1078,7 @@ def main():
         result = cmd.cmdloop()
 
     cmd.config["htb"]["session"] = cmd.cnxn.session.cookies.get(
-        "hackthebox_session", default=None, domain="www.hackthebox.eu"
+        "hackthebox_session", default="", domain="www.hackthebox.eu"
     )
     with open(os.path.expanduser(config), "w") as f:
         cmd.config.write(f)

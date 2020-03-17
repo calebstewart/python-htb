@@ -7,6 +7,7 @@ import configparser
 import NetworkManager
 import subprocess
 from colorama import Fore, Style, Back
+import queue
 import argparse
 import os.path
 import tempfile
@@ -16,6 +17,7 @@ import dbus
 import sys
 import os
 
+from htb import util
 from htb import Connection, Machine, VPN
 from htb.exceptions import (
     RequestFailed,
@@ -24,6 +26,7 @@ from htb.exceptions import (
     InvalidConnectionID,
 )
 import htb.scanner
+from htb.scanner.scanner import Tracker, Scanner, Service
 
 
 class HackTheBox(Cmd):
@@ -80,6 +83,13 @@ class HackTheBox(Cmd):
             f"{Fore.CYAN}htb{Fore.RESET} {Style.BRIGHT+Fore.GREEN}➜{Style.RESET_ALL} "
         )
 
+        # List of job trackers
+        self.jobs: List[Tracker] = []
+        self.job_events: queue.Queue = queue.Queue()
+
+        # Enable self in python
+        self.self_in_py = True
+
     def twofactor_prompt(self) -> None:
         self.pwarning("One Time Password: ", end="")
         sys.stderr.flush()
@@ -112,6 +122,81 @@ class HackTheBox(Cmd):
         super(HackTheBox, self).perror(
             msg, end=end, apply_style=False,
         )
+
+    jobs_parser = Cmd2ArgumentParser(description="Manage background scanner jobs")
+    jobs_parser.set_defaults(action="list")
+    jobs_subparsers = jobs_parser.add_subparsers(help="Actions", dest="_action")
+
+    @cmd2.with_argparser(jobs_parser)
+    @cmd2.with_category("Management")
+    def do_jobs(self, args: argparse.Namespace) -> bool:
+        """ Manage running background scanner jobs """
+
+        actions = {"list": self._jobs_list, "kill": self._jobs_kill}
+        actions[args.action](args)
+        return False
+
+    jobs_list_parser = jobs_subparsers.add_parser(
+        "list",
+        aliases=["ls"],
+        description="List background scanner jobs and their status",
+        prog="jobs list",
+    )
+    jobs_list_parser.set_defaults(action="list")
+
+    def _jobs_list(self, args: argparse.Namespace) -> None:
+        """ List the background scanner jobs """
+
+        # Grab any pending events
+        try:
+            while True:
+                t = self.job_events.get_nowait()
+                t.thread.join()
+                t.thread = None
+                t.status = "completed"
+        except queue.Empty:
+            pass
+
+        table = [["", "Host", "Service", "Scanner", "Status"]]
+        for ident, job in enumerate(self.jobs):
+            style = Style.DIM if job.thread is None else ""
+            table.append(
+                [
+                    ">" + style + str(ident),
+                    job.machine.name,
+                    f"{job.service.port}/{job.service.protocol} ({job.service.name})",
+                    job.scanner.name,
+                    job.status,
+                ]
+            )
+
+        self.ppaged("\n".join(util.build_table(table)))
+
+    jobs_kill_parser = jobs_subparsers.add_parser(
+        "kill",
+        aliases=["rm", "stop"],
+        description="Stop a running background scanner job",
+        prog="jobs kill",
+    )
+    jobs_kill_parser.add_argument("job_id", type=int, help="Kill the identified job")
+    jobs_kill_parser.set_defaults(action="kill")
+
+    def _jobs_kill(self, args: argparse.Namespace) -> None:
+        """ Stop a running background scanner job """
+
+        # Ensure the job exists
+        if args.job_id < 0 or args.job_id >= len(self.jobs):
+            self.perror(f"{args.job_id}: no such job")
+            return
+
+        job = self.jobs[args.job_id]
+        if job.thread is None:
+            self.pwarning(f"{args.job_id}: already completed")
+            return
+
+        # Inform it should stop
+        self.poutput(f"killing job {args.job_id}")
+        job.stop = True
 
     # Argument parser for `machine` command
     machine_parser = Cmd2ArgumentParser(
@@ -200,10 +285,8 @@ class HackTheBox(Cmd):
         ]
         rating_color = [*([Fore.GREEN] * 3), *([Fore.YELLOW] * 4), *([Fore.RED] * 3)]
 
-        # Header row
-        output = [
-            f"{Style.BRIGHT}{' '*id_width}  {'Name':<{name_width}}{'Address':<{ip_width}}{' Difficulty':<{diff_width}}{'Rate':<{rating_width}}{'Owned':<{owned_width}}{'State':<{state_width}}{Style.RESET_ALL}"
-        ]
+        # Build initial table with headers
+        table = [["", "", "Name", "Address", "Difficulty", "Rate", "Owned", "State"]]
 
         # Create the individual machine rows
         for m in machines:
@@ -212,14 +295,17 @@ class HackTheBox(Cmd):
             # Create scaled difficulty rating. Highest rated is full. Everything
             # else is scaled appropriately.
             max_ratings = max(m.ratings)
-            ratings = [float(r) / max_ratings for r in m.ratings]
+            if max_ratings == 0:
+                ratings = m.ratings
+            else:
+                ratings = [float(r) / max_ratings for r in m.ratings]
             difficulty = ""
             for i, r in enumerate(ratings):
                 difficulty += rating_color[i] + rating_char[round(r * 6)]
             difficulty += Style.RESET_ALL
 
             # "$" for user and "#" for root
-            owned = f" {'$' if m.owned_user else ' '} {'#' if m.owned_root else ' '} "
+            owned = f"^{'$' if m.owned_user else ' '} {'#' if m.owned_root else ' '}"
 
             # Display time left/terminating/resetting/off etc
             if m.spawned and not m.terminating and not m.resetting:
@@ -233,18 +319,26 @@ class HackTheBox(Cmd):
 
             # Show an astrics and highlight state in blue for assigned machine
             if m.assigned:
-                state = Fore.BLUE + state + Style.RESET_ALL
+                state = Fore.BLUE + state + Fore.RESET
                 assigned = f"{Fore.BLUE}*{Style.RESET_ALL} "
             else:
-                assigned = "  "
+                assigned = " "
 
-            # Construct row
-            output.append(
-                f"{style}{m.id:<{id_width}}{assigned}{m.name:<{name_width}}{m.ip:<{ip_width}} {difficulty} {m.rating:<{rating_width}.1f}{owned:<{owned_width}}{state:<{state_width}}{Style.RESET_ALL}"
+            table.append(
+                [
+                    f"{style}{m.id}",
+                    assigned,
+                    m.name,
+                    m.ip,
+                    difficulty,
+                    f"{m.rating:.1f}",
+                    owned,
+                    state,
+                ]
             )
 
         # print data
-        self.ppaged("\n".join(output))
+        self.ppaged("\n".join(util.build_table(table)))
 
     machine_start_parser = machine_subparsers.add_parser(
         "start", aliases=["up", "spawn"], help="Start a machine", prog="machine up"

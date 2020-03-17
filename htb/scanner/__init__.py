@@ -3,6 +3,7 @@ from typing import List, Dict, Union
 from threading import Barrier
 from cmd2 import Cmd
 import threading
+import signal
 import queue
 import shlex
 import time
@@ -11,12 +12,12 @@ import os
 import re
 
 import htb.machine
-from htb.scanner.scanner import Service, Scanner
+from htb.scanner.scanner import Service, Scanner, Tracker
 from htb.scanner.nikto import NiktoScanner
 from htb.scanner.enum4linux import Enum4LinuxScanner
 from htb.scanner.gobuster import GobusterScanner
 
-AVAILABLE_SCANNERS = [NiktoScanner(), Enum4LinuxScanner(), GobusterScanner()]
+AVAILABLE_SCANNERS = [Enum4LinuxScanner(), GobusterScanner()]
 
 
 def scan(
@@ -39,19 +40,23 @@ def scan(
             return
 
         if repl.cnxn.assigned is not None and repl.cnxn.assigned.id != machine.id:
-            repl.pwarning(
-                f"{repl.cnxn.assigned.name} currently assigned. Stop it? (Y/n) ",
-                end="",
-            )
-            sys.stderr.flush()
-            resp = repl.read_input("")
 
-            if resp.lower() == "n":
-                repl.perror("cannot start machine; aborting")
-                return
+            if repl.cnxn.assigned.terminating:
+                repl.poutput("{repl.cnxn.assigned.name} already terminating")
+            else:
+                repl.pwarning(
+                    f"{repl.cnxn.assigned.name} currently assigned. Stop it? (Y/n) ",
+                    end="",
+                )
+                sys.stderr.flush()
+                resp = repl.read_input("")
 
-            repl.poutput(f"{repl.cnxn.assigned.name}: requesting termination")
-            repl.cnxn.assigned.spawned = False
+                if resp.lower() == "n":
+                    repl.perror("cannot start machine; aborting")
+                    return
+
+                repl.poutput(f"{repl.cnxn.assigned.name}: requesting termination")
+                repl.cnxn.assigned.spawned = False
 
             repl.poutput("waiting for machine termination or transfer...")
 
@@ -103,8 +108,11 @@ def scan(
     # Run a fast all ports scan for TCP
     repl.psuccess(f"running tcp all ports scan w/ masscan")
     result = os.system(
-        f"sudo masscan {shlex.quote(machine.ip)} -p 0-65535 --max-rate 1000 -oG {shlex.quote(os.path.join(path, 'scans', 'masscan-tcp.grep'))} -e tun0"
+        f"sudo masscan {shlex.quote(machine.ip)} -p 80 --max-rate 1000 -oG {shlex.quote(os.path.join(path, 'scans', 'masscan-tcp.grep'))} -e tun0"
     )
+
+    # masscan output messes up future prompts for some reason
+    sys.stdout.write("\n")
 
     # Notify on error and abort
     if result != 0:
@@ -127,17 +135,31 @@ def scan(
     complete_queue = queue.Queue()
 
     # Run all recommended scanners in the background if requested
-    for service in services:
-        for scanner in [
-            s for s in AVAILABLE_SCANNERS if s.match(service) and s.recommended
-        ]:
-            repl.pwarning(f"starting recommended scanner {scanner.name} in background")
-            handle = scanner.background(
-                complete_queue, path, hostname, machine, service
-            )
-            background_scanners[
-                f"{scanner.name}-{service.port}-{service.protocol}"
-            ] = handle
+    if run_recommended:
+        for service in services:
+            for scanner in [
+                s for s in AVAILABLE_SCANNERS if s.match(service) and s.recommended
+            ]:
+                repl.pwarning(
+                    f"starting recommended scanner {scanner.name} in background"
+                )
+
+                # Create a tracker and the job
+                tracker = Tracker(
+                    True,
+                    machine,
+                    service,
+                    scanner,
+                    "running",
+                    repl.job_events,
+                    None,
+                    False,
+                    {},
+                )
+                tracker.thread = scanner.background(
+                    tracker, path, hostname, machine, service
+                )
+                repl.jobs.append(tracker)
 
     # Iterate over valid services
     for service in services:
@@ -147,47 +169,78 @@ def scan(
             for s in AVAILABLE_SCANNERS
             if s.match(service) and s.ident(service) not in background_scanners
         ]:
-            repl.pwarning(
+            repl.poutput(
                 f"run matching scanner {scanner.name} for {service.port}/{service.protocol} ({service.name})? (Y/n/b) ",
                 end="",
             )
             sys.stderr.flush()
+            sys.stdout.flush()
 
-            response = repl.read_input("").lower()
+            response = input("").strip()  # repl.read_input("").lower()
 
             if response == "n":
                 continue
-            elif response == "b":
+
+            # Create the tracker
+            tracker = Tracker(
+                False,
+                machine,
+                service,
+                scanner,
+                "running",
+                repl.job_events,
+                None,
+                False,
+                {},
+                threading.Lock(),
+            )
+
+            if response == "b":
                 repl.pwarning(
                     f"backgrounding {scanner.name} for {service.port}/{service.protocol}"
                 )
-                handle = scanner.background(
-                    complete_queue, path, hostname, machine, service
+
+                tracker.silent = True
+                tracker.thread = scanner.background(
+                    tracker, path, hostname, machine, service
                 )
-                background_scanners[
-                    f"{scanner.name}-{service.port}-{service.protocol}"
-                ] = handle
+                repl.jobs.append(tracker)
             else:
-                scanner.scan(path, hostname, machine, service)
+                events = queue.Queue()
+                tracker.job_events = events
 
-    if len(background_scanners):
-        repl.poutput("waiting for background scans to complete")
+                class GoToSleep(Exception):
+                    pass
 
-    while len(background_scanners):
-        # Get the next completion message
-        scanner, service = complete_queue.get()
+                def background_me(signo, stack):
+                    """ Transfer running task to background thread """
+                    signal.signal(signal.SIGTSTP, signal.SIG_DFL)
+                    raise GoToSleep
 
-        ident = f"{scanner.name}-{service.port}-{service.protocol}"
+                try:
+                    signal.signal(signal.SIGTSTP, background_me)
 
-        # Join the thread
-        background_scanners[ident].join()
+                    tracker.thread = scanner.background(
+                        tracker, path, hostname, machine, service
+                    )
 
-        # Notify user
-        repl.psuccess(
-            f"background scan {scanner.name} on {service.port}/{service.protocol} completed"
-        )
+                    try:
+                        tracker = tracker.job_events.get()
+                    except KeyboardInterrupt:
+                        repl.pwarning(
+                            f"cancelling {scanner.name} for {service.port}/{service.protocol}"
+                        )
+                        tracker.stop = True
 
-        # Remove from table
-        del background_scanners[ident]
+                    # Restore previous signal
+                    signal.signal(signal.SIGTSTP, signal.SIG_DFL)
+                except GoToSleep:
+                    with tracker.lock:
+                        repl.pwarning(
+                            f"backgrounding {scanner.name} for {service.port}/{service.protocol}"
+                        )
+                        tracker.silent = True
+                        tracker.job_events = repl.job_events
+                        repl.jobs.append(tracker)
 
     return

@@ -127,9 +127,6 @@ class Connection(object):
     def _authenticate(self) -> None:
         """ Check that the provided API key is valid and query user details """
 
-        # Attempt to grab connection status
-        r = self._api("/users/htb/connection/status")
-
         # Test email/password auth as well
         if self.email is not None and self.password is not None:
 

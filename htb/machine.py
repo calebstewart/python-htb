@@ -129,7 +129,7 @@ class Machine(object):
         try:
             return [m["difficulty_ratings"] for m in machines if m["id"] == self.id][0]
         except IndexError:
-            return None
+            return [0 for i in range(10)]
 
     @property
     def matrix(self) -> Dict[str, List[int]]:

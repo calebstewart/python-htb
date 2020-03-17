@@ -11,6 +11,7 @@ import queue
 import argparse
 import os.path
 import tempfile
+import signal
 import shlex
 import time
 import dbus
@@ -19,14 +20,10 @@ import os
 
 from htb import util
 from htb import Connection, Machine, VPN
-from htb.exceptions import (
-    RequestFailed,
-    AuthFailure,
-    ConnectionNotFound,
-    InvalidConnectionID,
-)
-import htb.scanner
+from htb.exceptions import *
 from htb.scanner.scanner import Tracker, Scanner, Service
+from htb.scanner import AVAILABLE_SCANNERS
+import htb.scanner
 
 
 class HackTheBox(Cmd):
@@ -76,6 +73,7 @@ class HackTheBox(Cmd):
             email=email,
             password=password,
             existing_session=session,
+            analysis_path=self.config["htb"].get("analysis_path", "~/htb"),
             twofactor_prompt=self.twofactor_prompt,
         )
 
@@ -89,6 +87,9 @@ class HackTheBox(Cmd):
 
         # Enable self in python
         self.self_in_py = True
+
+        # Aliases
+        self.aliases["exit"] = "quit"
 
     def twofactor_prompt(self) -> None:
         self.pwarning("One Time Password: ", end="")
@@ -153,7 +154,7 @@ class HackTheBox(Cmd):
                 t = self.job_events.get_nowait()
                 t.thread.join()
                 t.thread = None
-                t.status = "completed"
+                # t.status = "completed"
         except queue.Empty:
             pass
 
@@ -217,7 +218,8 @@ class HackTheBox(Cmd):
             "info": self._machine_info,
             "cancel": self._machine_cancel,
             "reset": self._machine_reset,
-            "init": self._machine_init,
+            "scan": self._machine_scan,
+            "enum": self._machine_enum,
         }
         actions[args.action](args)
         return False
@@ -735,46 +737,24 @@ class HackTheBox(Cmd):
                 m.resetting = False
                 self.psuccess(f"{m.name}: pending reset cancelled")
 
-    machine_init_parser = machine_subparsers.add_parser(
-        "init", help="Perform intiial preliminary scans on host", prog="machine init"
+    machine_enum_parser = machine_subparsers.add_parser(
+        "enum", aliases=["enumerate"], help="Perform initial service enumeration"
     )
-    machine_init_parser.add_argument(
-        "--path",
-        "-p",
-        type=str,
-        default=None,
-        help="Location to build analysis directory (default: ./{machine-name}.{tld}",
-    )
-    machine_init_parser.add_argument(
-        "--tld",
-        "-t",
-        type=str,
-        default="htb",
-        help="The Top-Level Domain (TLD) to use in the /etc/hosts file (default: htb)",
-    )
-    machine_init_parser.add_argument(
-        "--recommended",
-        "-r",
-        action="store_true",
-        default=False,
-        help="Run recommended scans automatically in the background",
-    )
-    machine_init_group = machine_init_parser.add_mutually_exclusive_group(required=True)
-    machine_init_group.add_argument(
+    machine_enum_group = machine_enum_parser.add_mutually_exclusive_group(required=True)
+    machine_enum_group.add_argument(
         "--assigned",
         "-a",
         action="store_true",
         help="Perform action on the currently assigned machine",
         default=False,
     )
-    machine_init_group.add_argument(
+    machine_enum_group.add_argument(
         "machine", nargs="?", help="A name regex, IP address or machine ID to start",
     )
-    machine_init_parser.set_defaults(action="init")
+    machine_enum_parser.set_defaults(action="enum")
 
-    def _machine_init(self, args: argparse.Namespace) -> None:
-        """ Initialize a directory structure for starting analysis of a machine, and
-        kick-off preliminary scans """
+    def _machine_enum(self, args: argparse.Namespace) -> None:
+        """ Perform initial service enumeration """
 
         # Use the assigned machine if requested
         if args.assigned:
@@ -796,64 +776,191 @@ class HackTheBox(Cmd):
                 self.perror(f"{machine_id}: no such machine")
                 return
 
-        # Build path if not specified
-        if args.path is None:
-            args.path = f"./{m.name.lower()}.{args.tld}"
+        if m.analysis_path is None:
+            self.pwarning("initializing analysis structure")
 
-        # Expand `~` in the path
-        args.path = os.path.expanduser(args.path)
+            try:
+                m.init(self.cnxn.analysis_path)
+            # except OSError as e:
+            #     self.perror(f"failed to create directory structure: {e}")
+            #     return
+            except EtcHostsFailed:
+                self.perror("failed to add host to /etc/hosts")
+                return
 
-        # Ensure the directory doesn't exist yet
-        if os.path.exists(args.path):
-            self.perror(f"{args.path}: directory exists")
-            return
-
-        self.poutput("creating analysis directory tree")
-
-        # Get full path
-        args.path = os.path.abspath(args.path)
-
-        # Create the directory
-        self.poutput(f"  {args.path}")
-        os.mkdir(args.path)
-
-        # Create directory tree
-        self.poutput(f"  {os.path.join(args.path, 'scans')}")
-        os.makedirs(os.path.join(args.path, "scans"))
-        self.poutput(f"  {os.path.join(args.path, 'artifacts')}")
-        os.makedirs(os.path.join(args.path, "artifacts"))
-        self.poutput(f"  {os.path.join(args.path, 'exploits')}")
-        os.makedirs(os.path.join(args.path, "exploits"))
-        self.poutput(f"  {os.path.join(args.path, 'img')}")
-        os.makedirs(os.path.join(args.path, "img"))
-
-        # Create initial readme
-        self.poutput(f"creating initial readme")
-        with open(os.path.join(args.path, "README.md"), "w") as f:
-            f.write(
-                f"""
-# Hack the Box - {m.name} - {m.ip}
-
-Preliminary scanning structure. Any completed scans are stored under `./scans`.
-"""
+        if len(m.services) == 0:
+            self.poutput("enumerating machine services")
+            try:
+                m.enumerate()
+            except MasscanFailed:
+                self.perror("masscan failed")
+            except NmapFailed:
+                self.perror("nmap failed")
+        else:
+            self.poutput(
+                f"{m.name} already enumerated ({len(m.services)} service(s) detected)"
             )
 
-        # Add the host to /etc/hosts
-        #   NOTE: I *really* don't like calling sudo like this...
-        self.poutput(f"adding {m.name.lower()}.{args.tld} to /etc/hosts")
-        line = f"\\n{m.ip}\\t{m.name.lower()}.{args.tld}\\n"
-        line = f"echo -e {shlex.quote(line)} >> /etc/hosts"
-        os.system(f"sudo /bin/sh -c {shlex.quote(line)}")
+    machine_scan_parser = machine_subparsers.add_parser(
+        "scan",
+        help="Perform prepared applicable scans against this host",
+        prog="machine scan",
+    )
+    machine_scan_parser.add_argument(
+        "--service",
+        "-v",
+        help="Only run scans for this service (format: `{PORT}/{PROTOCOL}`)",
+    )
+    machine_scan_parser.add_argument(
+        "--scanner", "-s", help="Only run scans for this scanner"
+    )
+    machine_scan_parser.add_argument(
+        "--recommended", "-r", help="Run all recommended scans"
+    )
+    machine_scan_parser.add_argument(
+        "--background",
+        "-b",
+        help="Run scans in the background",
+        action="store_true",
+        default=False,
+    )
+    machine_scan_group = machine_scan_parser.add_mutually_exclusive_group(required=True)
+    machine_scan_group.add_argument(
+        "--assigned",
+        "-a",
+        action="store_true",
+        help="Perform action on the currently assigned machine",
+        default=False,
+    )
+    machine_scan_group.add_argument(
+        "machine", nargs="?", help="A name regex, IP address or machine ID to start",
+    )
+    machine_scan_parser.set_defaults(action="scan")
 
-        # Perform initial scans
-        self.poutput(f"starting preliminary scanners")
-        htb.scanner.scan(
-            self,
-            args.path,
-            f"{m.name.lower()}.{args.tld}",
-            m,
-            run_recommended=args.recommended,
-        )
+    def _machine_scan(self, args: argparse.Namespace) -> None:
+        """ Scan the open service for the given machine """
+
+        if args.assigned:
+            m = self.cnxn.assigned
+            if m is None:
+                self.perror(f"no currently assigned machine")
+                return
+        else:
+            # Convert to integer, if possible. Otherwise pass as-is
+            try:
+                machine_id = int(args.machine)
+            except:
+                machine_id = args.machine
+
+            try:
+                m = self.cnxn[machine_id]
+            except KeyError:
+                self.perror(f"{machine_id}: no such machine")
+                return
+
+        if args.recommended:
+            scanners = [s for s in AVAILABLE_SCANNERS if s.recommended and s.match(m)]
+        elif args.scanner:
+            scanners = [s for s in AVAILABLE_SCANNERS if s.name == args.scanner]
+        else:
+            scanners = [s for s in AVAILABLE_SCANNERS if s.match(m)]
+
+        if args.service:
+            port = int(args.service.split("/")[0])
+            protocol = args.service.split("/")[1]
+            services = [
+                s for s in m.services if s.port == port and s.protocol == protocol
+            ]
+        else:
+            services = m.services
+
+        if len(services) == 0:
+            self.perror("no matching services found")
+            return
+
+        # Get scanners that match a service specified/present
+        if args.recommended:
+            scanners = [
+                s
+                for s in scanners
+                if s.recommended and any([s.match_service(svc) for svc in services])
+            ]
+        elif args.scanner:
+            scanners = [
+                s
+                for s in scanners
+                if s.name == args.scanner
+                and any([s.match_service(svc) for svc in services])
+            ]
+        else:
+            scanners = [
+                s for s in scanners if any([s.match_service(svc) for svc in services])
+            ]
+
+        if len(scanners) == 0:
+            self.perror(f"no matching scanners found")
+            return
+
+        # Iterate over all scanners and services to run the correct scans
+        for service in services:
+            for scanner in scanners:
+                if not scanner.match_service(service):
+                    continue
+
+                self.poutput(
+                    f"beginning {scanner.name} scan on {service.port}/{service.protocol} ({service.name})"
+                )
+                tracker = m.scan(scanner, service, silent=args.background)
+                if args.background:
+                    # Transfer control of the scan to the `jobs` command
+                    tracker.events = self.job_events
+                    tracker.lock.release()
+                    self.jobs.append(tracker)
+                else:
+                    # Monitor the scan progress in the forground, and give
+                    # options to cancel or background the scan
+                    self.monitor_scan(tracker)
+
+    def monitor_scan(self, tracker: Tracker) -> None:
+        """ Monitor a foreground scan """
+
+        # Setup local event queue for completion
+        events = queue.Queue()
+        tracker.job_events = events
+        tracker.lock.release()
+
+        # Exception used when C-z is pressed to background a task
+        class GoToSleep(Exception):
+            pass
+
+        def background_me(signo, stack):
+            """ Transfer running task to background thread """
+            # Turn off the signal handler
+            signal.signal(signal.SIGTSTP, signal.SIG_DFL)
+            raise GoToSleep
+
+        try:
+            # Register C-z handler
+            signal.signal(signal.SIGTSTP, background_me)
+
+            try:
+                tracker = tracker.job_events.get()
+            except KeyboardInterrupt:
+                self.pwarning(
+                    f"cancelling {tracker.scanner.name} for {tracker.service.port}/{tracker.service.protocol}"
+                )
+                tracker.stop = True
+
+            # Restore previous signal
+            signal.signal(signal.SIGTSTP, signal.SIG_DFL)
+        except GoToSleep:
+            with tracker.lock:
+                self.pwarning(
+                    f"backgrounding {tracker.scanner.name} for {tracker.service.port}/{tracker.service.protocol}"
+                )
+                tracker.silent = True
+                tracker.events = self.job_events
+                self.jobs.append(tracker)
 
     # Argument parser for `machine` command
     lab_parser = Cmd2ArgumentParser(description="View and manage lab VPN connection")
@@ -1162,20 +1269,50 @@ def main():
         config = "~/.htbrc"
 
     # Build REPL object
-    cmd = HackTheBox(resource=config)
+    cmd = HackTheBox(resource=config, allow_cli_args=False)
 
     # Run remaning arguments as a command
     if len(sys.argv) > 1:
         cmd.onecmd(" ".join([shlex.quote(x) for x in sys.argv[1:]]))
-        result = 0
+        if len([j for j in cmd.jobs if j.thread is not None]):
+            cmd.pwarning("background jobs active. staring interpreter...")
+            result = cmd.cmdloop()
+        else:
+            result = 0
     else:
         result = cmd.cmdloop()
+
+    try:
+        if len([j for j in cmd.jobs if j.thread is not None]):
+            cmd.poutput("waiting for background jobs to complete")
+        while len([j for j in cmd.jobs if j.thread is not None]):
+            tracker = cmd.job_events.get()
+            tracker.status = "completed"
+            tracker.thread = None
+    except KeyboardInterrupt:
+        cmd.pwarning("cancelling background jobs")
+        for j in cmd.jobs:
+            j.stop = True
+
+        try:
+            while len([j for j in cmd.jobs if j.thread is not None]):
+                tracker = cmd.job_events.get()
+                tracker.status = "completed"
+                tracker.thread = None
+        except KeyboardInterrupt:
+            cmd.pwarning("forcing background job exit!")
+            for j in [j for j in cmd.jobs if j.thread is not None]:
+                j.thread.daemon = True
 
     cmd.config["htb"]["session"] = cmd.cnxn.session.cookies.get(
         "hackthebox_session", default="", domain="www.hackthebox.eu"
     )
     with open(os.path.expanduser(config), "w") as f:
         cmd.config.write(f)
+
+    for m in cmd.cnxn.machines:
+        if m.dump():
+            cmd.poutput(f"saved enumeration data for {m.name}")
 
 
 if __name__ == "__main__":

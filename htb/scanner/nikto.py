@@ -1,15 +1,16 @@
 #!/usr/bin/env python3
+from typing import Union
 import subprocess
 import shlex
 import time
 import sys
 import os
 
-from htb.machine import Machine
-from htb.scanner.scanner import Scanner, Service, Tracker
+# from htb.machine import Machine
+from htb.scanner.scanner import ExternalScanner, Service, Tracker, Scanner
 
 
-class NiktoScanner(Scanner):
+class NiktoScanner(ExternalScanner):
     """ Scan a web server with nikto """
 
     def __init__(self):
@@ -25,7 +26,7 @@ class NiktoScanner(Scanner):
         tracker: Tracker,
         path: str,
         hostname: str,
-        machine: Machine,
+        machine: "htb.machine.Machine",
         service: Service,
     ) -> None:
         """ Scan the host with nikto """
@@ -37,36 +38,17 @@ class NiktoScanner(Scanner):
 
         url = f"http://{hostname}:{service.port}"
 
-        # Call enum4linux
-        tracker.data["popen"] = subprocess.Popen(
-            ["nikto", "-ask", "no", "-output", output_path, "-host", url],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.DEVNULL,
+        return super(NiktoScanner, self).scan(
+            tracker,
+            path,
+            hostname,
+            machine,
+            service,
+            argv=["nikto", "-ask", "no", "-output", output_path, "-host", url],
         )
 
-        while tracker.data["popen"].poll() is None:
-            line = tracker.data["popen"].stdout.readline()
-
-            # Output if not silent
-            if not tracker.silent:
-                sys.stdout.write(line.decode("utf-8"))
-
-            output.write(line.decode("utf-8"))
-
-            yield "running"
-
-            time.sleep(0.1)
-
-        output.close()
-
-        yield "completed"
-
-    def cancel(self, tracker: Tracker) -> None:
-        """ Ensure the running process dies """
-
-        tracker.data["popen"].terminate()
-        try:
-            tracker.data["popen"].wait(timeout=1)
-        except subprocess.TimeoutExpired:
-            tracker.data["popen"].kill()
-            tracker.data["popen"].wait()
+    def do_line(
+        self, tracker: Tracker, scanner: Scanner, line: bytes
+    ) -> Union[None, str]:
+        """ I have no useful progress info for Nikto :( """
+        return None

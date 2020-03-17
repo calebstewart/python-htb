@@ -1,11 +1,16 @@
 #!/usr/bin/env python3
 from typing import List, Dict, Any, Generator
 from dataclasses import dataclass
+import subprocess
 import threading
+import datetime
+import signal
 import queue
+import time
+import sys
 import re
 
-from htb.machine import Machine
+# from htb.machine import Machine
 
 
 class Service(object):
@@ -35,11 +40,46 @@ class Service(object):
 
         return self
 
+    @classmethod
+    def from_nmap(cls, data: str):
+        """ Build service from a line of greppable masscan results """
+
+        # Grab the last column
+        service_data = data.split("/")
+
+        self = Service()
+        self.port = int(service_data[0])
+        self.state = service_data[1]
+        self.protocol = service_data[2]
+        self.name = service_data[4]
+        self.host = None  # data.split("Host: ")[1].split(" ")[0]
+
+        return self
+
+    def json(self) -> Dict[str, Any]:
+        """ Converts this object to a dictionary appropriate for JSON output """
+        return {
+            "port": self.port,
+            "protocol": self.protocol,
+            "state": self.state,
+            "name": self.name,
+        }
+
+    @classmethod
+    def from_json(cls, data):
+        self = Service()
+        self.port = data["port"]
+        self.protocol = data["protocol"]
+        self.state = data["state"]
+        self.name = data["name"]
+        self.host = None
+        return self
+
 
 @dataclass
 class Tracker(object):
     silent: bool
-    machine: Machine
+    machine: Any
     service: Service
     scanner: "Scanner"
     status: str
@@ -75,30 +115,18 @@ class Scanner(object):
         """ Get unique identifier for this service/scanner combo """
         return f"{self.name}-{service.port}-{service.protocol}"
 
-    def match(self, service: Service) -> bool:
+    def match(self, machine: "htb.machine.Machine") -> List[Service]:
         """ Match this scanner to a service. Returns true if it matches """
+        return [service for service in machine.services if self.match_service(service)]
 
-        # Protocol has to match
-        if service.protocol not in self.protocol:
-            return False
-
-        # Exact port match
-        if service.port in self.ports:
-            return True
-
-        # Regular expression service match
-        if any([r.match(service.name) for r in self.regex]):
-            return True
-
-        return False
+    def match_service(self, service: Service) -> bool:
+        return service.protocol in self.protocol and (
+            service.port in self.ports
+            or any([r.match(service.name) for r in self.regex])
+        )
 
     def background(
-        self,
-        tracker: Tracker,
-        path: str,
-        hostname: str,
-        machine: Machine,
-        service: Service,
+        self, tracker: Tracker, path: str, hostname: str, machine, service: Service,
     ) -> threading.Thread:
         """ Start the scan in the background """
 
@@ -146,12 +174,7 @@ class Scanner(object):
         tracker.events.put(tracker)
 
     def _do_background_scan(
-        self,
-        tracker: Tracker,
-        path: str,
-        hostname: str,
-        machine: Machine,
-        service: Service,
+        self, tracker: Tracker, path: str, hostname: str, machine, service: Service,
     ) -> None:
         """ Start the scan in the background and notify the queue when it is complete """
         for status in self.scan(tracker, path, hostname, machine, service):
@@ -172,12 +195,79 @@ class Scanner(object):
         return
 
     def scan(
+        self, tracker: Tracker, path: str, hostname: str, machine, service: Service,
+    ) -> None:
+        """ Scan the service on this host """
+        yield "running"
+
+
+class ExternalScanner(Scanner):
+
+    LINE_DELIM = [b"\n"]
+
+    def __init__(self, *args, **kwargs):
+        super(ExternalScanner, self).__init__(*args, **kwargs)
+
+    def scan(
         self,
         tracker: Tracker,
         path: str,
         hostname: str,
-        machine: Machine,
+        machine: "htb.machine.Machine",
         service: Service,
-    ) -> None:
-        """ Scan the service on this host """
-        yield "running"
+        argv: List[str],
+    ):
+        """ Start the external application (specified by argv) and monitor output """
+
+        # Call gobuster
+        tracker.data["popen"] = subprocess.Popen(
+            argv,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            preexec_fn=lambda: signal.signal(signal.SIGTSTP, signal.SIG_IGN),
+        )
+
+        line = b""
+
+        # Track start time
+        start_time = time.time()
+
+        while tracker.data["popen"].poll() is None:
+
+            # Grab next byte
+            data = tracker.data["popen"].stdout.read(1)
+
+            # Not silent, output
+            if not tracker.silent:
+                sys.stdout.write(data.decode("utf-8"))
+
+            if data in self.LINE_DELIM:
+
+                # Set status
+                status = self.do_line(tracker, service, line)
+                if status is not None:
+                    yield status
+
+                line = b""
+
+                # We don't want a busy loop. Sleep after every line
+                time.sleep(0.1)
+            else:
+                line += data
+
+        yield f"completed in {datetime.timedelta(seconds=time.time()-start_time)}"
+
+    def do_line(self, tracker: Tracker, service: Service, line: bytes):
+        """ Process a line of output from the subprocess """
+
+        pass
+
+    def cancel(self, tracker: Tracker) -> None:
+        """ Ensure the running process dies """
+
+        tracker.data["popen"].terminate()
+        try:
+            tracker.data["popen"].wait(timeout=1)
+        except subprocess.TimeoutExpired:
+            tracker.data["popen"].kill()
+            tracker.data["popen"].wait()

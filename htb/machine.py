@@ -1,7 +1,14 @@
 #!/usr/bin/env python3
 from typing import Dict, Any, List
+from io import StringIO
+import subprocess
+import threading
+import json
+import os
+import re
 
-from htb.exceptions import RequestFailed
+from htb.scanner import Service, Scanner, Tracker, AVAILABLE_SCANNERS
+from htb.exceptions import *
 
 
 class Machine(object):
@@ -13,6 +20,32 @@ class Machine(object):
         self.connection = connection
 
         # Standard data (should always exist)
+        self.id: int = None
+        self.name: str = None
+        self.os: str = None
+        self.ip: str = None
+        self.avatar: str = None
+        self.points: str = None
+        self.release_date: str = None
+        self.retire_date: str = None
+        self.makers: List[Dict] = None
+        self.rating: float = None
+        self.user_owns: int = None
+        self.root_owns: int = None
+        self.free: bool = None
+        self.analysis_path: str = None
+        self.services: List[Service] = []
+        self.knowns: Dict[str, Any] = {}
+
+        self.update(data)
+
+    def __repr__(self) -> str:
+        return f"""<Machine id={self.id},name="{self.name}",ip="{self.ip}",os="{self.os}">"""
+
+    def update(self, data: Dict[str, Any]):
+        """ Update internal machine state from recent request """
+
+        # Standard data (should always exist)
         self.id: int = data["id"]
         self.name: str = data["name"]
         self.os: str = data["os"]
@@ -22,20 +55,18 @@ class Machine(object):
         self.release_date: str = data["release"]
         self.retire_date: str = data["retired_date"]
         self.makers: List[Dict] = [data["maker"]]
-        # self.rating: float = float(data["rating"])
         self.rating: float = 0.0
         self.user_owns: int = data["user_owns"]
         self.root_owns: int = data["root_owns"]
-        # self.retired: bool = data["retired"]
-        # self.free: bool = data["free"]
         self.free: bool = False
 
         # May exist
         if "maker2" in data and data["maker2"] is not None:
             self.makers.append(data["maker2"])
 
-    def __repr__(self) -> str:
-        return f"""<Machine id={self.id},name="{self.name}",ip="{self.ip}",os="{self.os}">"""
+    @property
+    def hostname(self) -> str:
+        return f"{self.name.lower()}.htb"
 
     @property
     def todo(self) -> bool:
@@ -244,3 +275,214 @@ class Machine(object):
             method="post",
             json={"stars": stars, "message": message},
         )
+
+    def init(self, base_path="./") -> None:
+        """ Initialize analysis directory and load an previous enumerations """
+
+        # Check if we already initialized the directory tree
+        try:
+            self.load(base_path)
+        except NoAnalysisPath:
+            # We didn't, pass to this function to do initialization
+            pass
+        else:
+            # We did, our job is done
+            return
+
+        # Create analysis path and check if it's currently a file
+        self.analysis_path = os.path.abspath(
+            os.path.expanduser(os.path.join(base_path, self.name.lower()))
+        )
+
+        # Create analysis structure
+        os.mkdir(self.analysis_path)
+        os.mkdir(os.path.join(self.analysis_path, "scans"))
+        os.mkdir(os.path.join(self.analysis_path, "artifacts"))
+        os.mkdir(os.path.join(self.analysis_path, "exploits"))
+        os.mkdir(os.path.join(self.analysis_path, "img"))
+
+        # Create initial readme
+        with open(os.path.join(self.analysis_path, "README.md"), "w") as f:
+            f.write(f"# Hack the Box - {self.name} - {self.ip}\n")
+
+        # Build hostname
+        hostname = f"{self.name.lower()}.htb"
+
+        # Check if we are already in /etc/hosts
+        with open("/etc/hosts", "r") as f:
+            in_hosts = any(
+                [
+                    re.fullmatch(f"^{self.ip}.*\\s+{self.hostname}.*$", line)
+                    is not None
+                    for line in f
+                ]
+            )
+
+        # Add our host to /etc/hosts if needed
+        if not in_hosts:
+            code = subprocess.run(
+                ["sudo", "tee", "-a", "/etc/hosts"],
+                input=bytes(f"\n{self.ip}\t{hostname}", "utf-8"),
+                stdout=subprocess.DEVNULL,
+            )
+            if code.returncode != 0:
+                raise EtcHostsFailed
+
+    def dump(self) -> bool:
+        """ Dump our current findings and services to a state file in the
+        anaylsis directory. If this machine has not been initialized, then don't
+        do anything. """
+
+        if self.analysis_path is None:
+            return False
+
+        with open(os.path.join(self.analysis_path, "machine.json"), "w") as fh:
+            json.dump(
+                {"services": [s.json() for s in self.services], "knowns": self.knowns},
+                fh,
+            )
+
+        return True
+
+    def load(self, base_path: str = "./") -> None:
+        """ Load saved machine information from `machine.json` in the analysis
+        directory. """
+
+        # Ensure the directory exists
+        analysis_path = os.path.expanduser(
+            os.path.join(base_path, f"{self.name.lower()}")
+        )
+        if not os.path.isdir(analysis_path):
+            raise NoAnalysisPath
+
+        try:
+            with open(os.path.join(analysis_path, "machine.json"), "r") as fh:
+                data = json.load(fh)
+                self.services = [Service.from_json(s) for s in data["services"]]
+                self.knowns = data["knowns"]
+            self.analysis_path = analysis_path
+        except OSError as e:
+            # No machine.json file
+            print(f"oserror: {e}")
+            raise NoAnalysisPath
+        except KeyError as e:
+            print(f"keyerror: {e}")
+            # Invalid machine json format
+            raise NoAnalysisPath
+
+    def enumerate(self, force: bool = False) -> None:
+        """ Enumerate running services on the machine
+
+        :param force: Force enumeration if it is already completed
+        :type force: bool
+        """
+
+        # The machine has to be running
+        if not self.spawned:
+            raise NotRunning
+
+        # It also needs to not be actively terminating
+        if self.terminating:
+            raise Terminating
+
+        # We already enumerated this machine
+        if not force and len(self.services):
+            return
+
+        masscan_path = os.path.join(self.analysis_path, "scans", "masscan.grep")
+        code = subprocess.call(
+            [
+                "sudo",
+                "masscan",
+                self.ip,
+                "-p",
+                "1-65535",
+                "--max-rate",
+                "1000",
+                "-oG",
+                masscan_path,
+                "-e",
+                "tun0",
+            ]
+        )
+
+        # Ensure masscan succeeded
+        if code != 0:
+            raise MasscanFailed
+
+        # Read all open port lines
+        with open(masscan_path, "r") as f:
+            ports = [
+                int(line.split(" ")[-1].split("/")[0])
+                for line in f.read().split("\n")
+                if line != "" and line[0] != "#" and "open" in line
+            ]
+
+        # Run an in-depth nmap scan for the open ports
+        nmap_path = os.path.join(self.analysis_path, "scans", "open-tcp")
+        code = subprocess.call(
+            [
+                "nmap",
+                "-Pn",
+                "-T5",
+                "-sV",
+                "-A",
+                "-p",
+                ",".join([str(p) for p in ports]),
+                "-oA",
+                nmap_path,
+                self.hostname,
+            ]
+        )
+
+        # Check nmap result
+        if code != 0:
+            raise NmapFailed
+
+        # Read greppable nmap output and extract open services
+        with open(nmap_path + ".gnmap", "r") as f:
+            services_list = [
+                line.split("Ports: ")[1]
+                for line in f.read().split("\n")
+                if line != "" and line[0] != "#" and "Ports:" in line
+            ]
+
+        self.services = []
+        for l in services_list:
+            for s in l.split(","):
+                self.services.append(Service.from_nmap(s.strip()))
+
+        # Ensure we write the services out
+        self.dump()
+
+    def scan(self, scanner: Scanner, service: Service, silent=False) -> Tracker:
+        """ Start a scan for the given service. A tracker is allocated with the
+        lock held and the `job_events` field set to None. """
+
+        if not scanner.match_service(service):
+            raise NotApplicable
+
+        # Construct a tracker object
+        tracker = Tracker(
+            silent=silent,
+            machine=self,
+            service=service,
+            scanner=scanner,
+            status="",
+            events=None,
+            thread=None,
+            stop=False,
+            data={},
+            lock=threading.Lock(),
+        )
+
+        # Acquire the lock so the scanner doesn't modify the event queue before
+        # initialization
+        tracker.lock.acquire()
+
+        # Start the background scan
+        tracker.thread = scanner.background(
+            tracker, self.analysis_path, self.hostname, self, service
+        )
+
+        return tracker

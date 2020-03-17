@@ -4,7 +4,7 @@ import requests
 import time
 import re
 
-from htb.exceptions import AuthFailure, TwoFactorAuthRequired
+from htb.exceptions import *
 from htb.vpn import VPN
 from htb.machine import Machine
 
@@ -20,6 +20,7 @@ class Connection(object):
         email=None,
         password=None,
         existing_session=None,
+        analysis_path=None,
         twofactor_prompt: Callable = None,
     ):
         """ Construct a connection with the specified API key """
@@ -41,6 +42,12 @@ class Connection(object):
         # Ongoing session for standard authentication
         self.session = requests.Session()
         self.session.cookies.update({"hackthebox_session": existing_session})
+
+        # List of tracked machines
+        self._machines: Dict[int, Machine] = {}
+
+        # Path where machine analysis is kept
+        self.analysis_path = analysis_path
 
     def invalidate_cache(self, endpoint: str = None, method: str = None) -> None:
         """ Invalidate the cache of one endpoint, endpoint/method or all entries """
@@ -198,10 +205,21 @@ class Connection(object):
         """ Grab the list of active machines """
 
         # Request all the machine information
-        machines = self._api("/machines/get/all", method="get", cache=True)
+        data = self._api("/machines/get/all", method="get", cache=True)
+
+        # Build internal machine list
+        for datum in data:
+            if int(datum["id"]) in self._machines:
+                self._machines[int(datum["id"])].update(datum)
+            else:
+                self._machines[int(datum["id"])] = Machine(self, datum)
+                try:
+                    self._machines[int(datum["id"])].load(self.analysis_path)
+                except NoAnalysisPath:
+                    pass
 
         # Create machine objects for all the machine information
-        return [Machine(self, m) for m in machines]
+        return [m for _, m in self._machines.items()]
 
     def get_machine(self, ident: int) -> Machine:
         """ Lookup a machine by ID """
@@ -209,7 +227,16 @@ class Connection(object):
         # request the machine
         machine = self._api(f"/machines/get/{ident}", method="get", cache=True)
 
-        return Machine(self, machine)
+        if ident in self._machines:
+            self._machines[ident].update(machine)
+        else:
+            self._machines[ident] = Machine(self, machine)
+            try:
+                self._machines[ident].load(self.analysis_path)
+            except NoAnalysisPath:
+                pass
+
+        return self._machines[ident]
 
     @property
     def active(self) -> List[Machine]:

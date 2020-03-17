@@ -6,7 +6,7 @@ import time
 import sys
 import os
 
-from htb.machine import Machine
+# from htb.machine import Machine
 from htb.scanner.scanner import Scanner, Service, Tracker
 from htb import util
 
@@ -27,7 +27,7 @@ class GobusterScanner(Scanner):
         tracker: Tracker,
         path: str,
         hostname: str,
-        machine: Machine,
+        machine: "htb.machine.Machine",
         service: Service,
     ) -> None:
         """ Scan the host with gobuster """

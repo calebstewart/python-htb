@@ -27,6 +27,30 @@ tool works :)
 - Command line interface
 - Automatically build analysis directory structure and start basic
   enumeration/scans.
+- Two Factor Authentication Support
+
+## Example Configuration File
+
+The `htb` command line application utilizes the `ConfigParser` module in Python
+to read a configuration file from `~/.htbrc`. This file contains your
+authentication information as well as any configuration items which may be
+available. Here's an example of the configuration file:
+
+```ini
+[htb]
+api_token = your_api_token
+email = your_email
+password = your_password
+session = session_token
+analysis_path = ~/htb
+
+[lab]
+connection = NetworkManager-Connection-UUID
+```
+
+The `connection` and `session` options are filled automatically on running to
+track sessions between running `htb` and the connection which `htb lab` is able
+to create with Network Manager.
 
 ## Example Command Line Usage
 
@@ -218,36 +242,87 @@ optional arguments:
   --assigned, -a        Perform action on the currently assigned machine
 ```
 
-### `machine init`
+### `machine enum`
 
-Setup a directory tree for machine analysis and perform initial scans. This
-routine will create the following directory tree:
-
-- {machine.name}.htb/
-  - artifacts/
-  - exploits/
-  - scans/
-  - img/
-  - README.md
-
-It then adds the given machine to `/etc/hosts`, ensures the machine is running
-and then starts a variety of basic scans on the target. Currently, the scans
-aren't implemented yet, but they will eventually look similar to the basic
-structure of my [init-machine](https://github.com/calebstewart/init-machine)
-script.
+Perform initial enumeration for the given machine. This will perform an
+all-ports scan with `masscan`, and use the results to do an in-depth scan with
+`nmap`. The results are saved under the `scans` directory for this machine.
+Also, individual service results are parsed and saved in the `machine.json` file
+at the root of the analysis directory. Future invocations of `htb` will be able
+to read this and skip the initial enumeration phase.
 
 ```
-htb ➜ machine init --help
-Usage: machine init [-h] [--path PATH] [--tld TLD] (--assigned | machine)
+htb ➜ machine enum --help
+Usage: htb enum [-h] (--assigned | machine)
 
 positional arguments:
-  machine          A name regex, IP address or machine ID to start
+  machine         A name regex, IP address or machine ID to start
 
 optional arguments:
-  -h, --help       show this help message and exit
-  --path, -p PATH  Location to build analysis directory (default: ./{machine-name}.{tld}
-  --tld, -t TLD    The Top-Level Domain (TLD) to use in the /etc/hosts file (default: htb)
-  --assigned, -a   Perform action on the currently assigned machine
+  -h, --help      show this help message and exit
+  --assigned, -a  Perform action on the currently assigned machine
+```
+
+### `machine scan`
+
+Perform basic scans which are applicable to enumerated services running on the
+machine. You must complete the `enum` command first, or no matching services
+will be located (because `htb` doesn't know what services are available). If a
+scan is started in the foreground, you can background the scan with `C-z`.
+Background jobs can be managed with the `jobs` command.
+
+```
+htb ➜ machine scan --help
+Usage: machine scan [-h] [--service SERVICE] [--scanner SCANNER] [--recommended RECOMMENDED] [--background]
+                    [--assigned]
+                    [machine]
+
+positional arguments:
+  machine               A name regex, IP address or machine ID to start
+
+optional arguments:
+  -h, --help            show this help message and exit
+  --service, -v SERVICE
+                        Only run scans for this service (format: `{PORT}/{PROTOCOL}`)
+  --scanner, -s SCANNER
+                        Only run scans for this scanner
+  --recommended, -r RECOMMENDED
+                        Run all recommended scans
+  --background, -b      Run scans in the background
+  --assigned, -a        Perform action on the currently assigned machine
+```
+
+### `jobs list`
+
+List all background jobs. This includes completed and running jobs, and will
+output the status if any is available from the individual scanner.
+
+```
+htb ➜ jobs list --help
+Usage: jobs list [-h]
+
+List background scanner jobs and their status
+
+optional arguments:
+  -h, --help  show this help message and exit
+```
+
+### `jobs kill`
+
+Kill the specified job ID. The job ID can be retrieved from the `jobs list`
+command.
+
+```
+htb ➜ jobs kill --help
+Usage: jobs kill [-h] job_id
+
+Stop a running background scanner job
+
+positional arguments:
+  job_id      Kill the identified job
+
+optional arguments:
+  -h, --help  show this help message and exit
 ```
 
 ### `lab status`

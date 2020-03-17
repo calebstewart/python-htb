@@ -93,59 +93,12 @@ shortcuts           List available shortcuts
 To run a command, simply append it to the command line when invoking the module.
 This is the first method of invocation:
 
-```
-$ python -m htb machine list --active
-      Name         Address        Difficulty Rate Owned  State
-200   Rope         10.10.10.148   ▂▁▁▁▁▁▂▃▄▇ 4.6   $ #   off
-211   Sniper       10.10.10.151   ▁▁▂▄▂▇▇▅▂▂ 4.6   $     off
-212   Forest       10.10.10.161   ▂▂▅▆▂▆▇▆▃▃ 4.6   $ #   11 hours
-213   Registry     10.10.10.159   ▂▂▄▆▂▆▇▅▃▂ 4.5   $ #   off
-214   Mango        10.10.10.162   ▃▄▆▇▂▆▅▃▂▂ 4.0   $ #   22 hours
-215   Postman      10.10.10.160   ▃▄▇▇▂▃▃▂▁▁ 4.0   $ #   off
-217   Traverxec    10.10.10.165   ▂▃▇▇▂▄▄▂▁▂ 4.3   $ #   22 hours
-218   Control      10.10.10.167   ▂▁▂▄▂▆▇▆▃▄ 4.5         off
-219   Obscurity    10.10.10.168   ▃▄▇▇▂▄▄▂▂▂ 3.9   $ #   14 hours
-220   Resolute     10.10.10.169   ▃▄▇▆▂▅▄▃▁▂ 4.7   $ #   13 hours
-221   PlayerTwo    10.10.10.170   ▂▁▁▁▁▂▃▃▄▇ 4.2         off
-222   OpenAdmin    10.10.10.171   ▅▅▇▆▂▃▃▂▁▁ 4.4   $ #   17 hours
-223   Monteverde   10.10.10.172   ▂▃▇▇▂▄▄▂▁▂ 4.3   $     off
-224   Patents      10.10.10.173   ▁▁▁▁▁▂▂▃▃▇ 3.7         off
-225   Nest         10.10.10.178   ▃▃▅▇▂▅▅▃▂▂ 3.9   $ #   14 hours
-227   Fatty        10.10.10.174   ▁▁▁▁▁▂▂▃▄▇ 4.4   $ #   off
-229   Sauna        10.10.10.175   ▂▃▇▇▂▄▃▂▁▂ 4.2   $     11 hours
-230 * Book         10.10.10.176   ▂▁▂▃▂▅▇▅▃▃ 3.8         23 hours
-231   Oouch        10.10.10.177   ▁▁▁▁▁▁▂▃▄▇ 4.6         17 hours
-232   Multimaster  10.10.10.179   ▃▁▂▁▁▂▃▅▂▇ 1.4         22 hours
-```
+![List Active Machines](https://user-images.githubusercontent.com/7529189/76907462-a7487b00-687c-11ea-852f-87d566fcefd4.png)
 
 Next, you can enter an interactive Hack the Box interpreter by
 ommitting the command:
 
-```
-python-htb on  master [!] via python-htb took 3s 
-➜ python -m htb machine info --assigned
-Sniper - 10.10.10.151 - Windows - 30 points - up for 23 hours
-
-Difficulty
-               ▆▆▆▁▁▁         
-               ██████▂▂▂      
-         ▃▃▃   █████████      
-      ▂▂▂███   █████████▂▂▂▃▃▃
-▃▃▃▃▃▃████████████████████████
-Easy        Medium        Hard
-
-Rating Matrix (maker, user)
-        ▅▅                          
- ██▁▁   ████           ██           
- ████   ████     ▁▁    ██▁▁         
- ████   ████     ██    ████         
- ████   ████   ████    ████    ▅▅██ 
- Enum  R-Life  CVE   Exploit   CTF  
-
-      User      Root
-Owns  1991      1769
-Blood snowscan  snowscan
-```
+![Show Currently Assigned Machine Details](https://user-images.githubusercontent.com/7529189/76907463-a7487b00-687c-11ea-81cf-7c1efd3e0817.png)
 
 ## Available Commands
 

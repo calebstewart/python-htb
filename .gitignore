@@ -6,3 +6,6 @@ env/
 dist/
 build/
 .idea/
+
+.ghimages/*
+.ghimages

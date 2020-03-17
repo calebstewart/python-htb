@@ -353,6 +353,60 @@ This command retrieves and outputs the contents of your OVPN configuration
 file. An E-mail and password must be set in your configuration file for
 this call to work (`api_token` alone is **not** enough).
 
+### `lab import`
+
+This command will retrieve you lab configuration and import it into
+NetworkManager. Obviously, you need to use Network Manager to manager your
+network cards for this to work properly. You also need the Network Manager
+OpenVPN plugin. The connection is managed by `htb` and the UUID is saved in your
+configuration file. 
+
+```
+htb ➜ lab import --help
+Usage: lab import [-h] [--reload] [--name NAME]
+
+Import your OpenVPN configuration into Network Manager
+
+optional arguments:
+  -h, --help       show this help message and exit
+  --reload, -r     Reload configuration from Hack the Box
+  --name, -n NAME  NetworkManager Connection ID
+```
+
+### `lab connect`
+
+This command will attempt to connect with Network Manager to the Hack the Box
+VPN. If the connection has not been imported, it will automoatically import the
+configuration. It looks for the connection specified by UUID in your
+configuration file.
+
+```
+htb ➜ lab connect --help
+Usage: lab connect [-h] [--update]
+
+Connect to the Hack the Box VPN. If no previous configuration has been created in NetworkManager, it attempts to download it and import it.
+
+optional arguments:
+  -h, --help    show this help message and exit
+  --update, -u  Force a redownload/import of the OpenVPN configuration
+```
+
+### `lab disconnect`
+
+Disconnect the Network Manager connection referring to the Hack the Box
+connection (specified in your configuration file).
+
+```
+htb ➜ lab connect --help
+Usage: lab connect [-h] [--update]
+
+Connect to the Hack the Box VPN. If no previous configuration has been created in NetworkManager, it attempts to download it and import it.
+
+optional arguments:
+  -h, --help    show this help message and exit
+  --update, -u  Force a redownload/import of the OpenVPN configuration
+```
+
 ### `invalidate`
 
 The connection object maintains an API response cache by default for up to

@@ -295,11 +295,10 @@ class Machine(object):
         )
 
         # Create analysis structure
-        os.mkdir(self.analysis_path)
-        os.mkdir(os.path.join(self.analysis_path, "scans"))
-        os.mkdir(os.path.join(self.analysis_path, "artifacts"))
-        os.mkdir(os.path.join(self.analysis_path, "exploits"))
-        os.mkdir(os.path.join(self.analysis_path, "img"))
+        os.makedirs(os.path.join(self.analysis_path, "scans"), exist_ok=True)
+        os.makedirs(os.path.join(self.analysis_path, "artifacts"), exist_ok=True)
+        os.makedirs(os.path.join(self.analysis_path, "exploits"), exist_ok=True)
+        os.makedirs(os.path.join(self.analysis_path, "img"), exist_ok=True)
 
         # Create initial readme
         with open(os.path.join(self.analysis_path, "README.md"), "w") as f:

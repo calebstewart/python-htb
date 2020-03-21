@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-from typing import Any
+from typing import Any, List, Dict, Union
 import cmd2
 from cmd2 import Cmd
 from cmd2.argparse_custom import Cmd2ArgumentParser
@@ -7,6 +7,7 @@ import configparser
 import NetworkManager
 import subprocess
 from colorama import Fore, Style, Back
+import functools
 import queue
 import argparse
 import os.path
@@ -38,6 +39,12 @@ class HackTheBox(Cmd):
         "other": "\uf233",
     }
 
+    _singleton = None
+    ASSIGNED = "\x00assigned\x00"
+
+    max_completion_items = 50
+    case_insensitive = True
+
     def __init__(self, resource="~/.htbrc", *args, **kwargs):
         super(HackTheBox, self).__init__(*args, **kwargs)
 
@@ -60,8 +67,8 @@ class HackTheBox(Cmd):
         api_token = parser["htb"].get("api_token", None)
         session = parser["htb"].get("session", None)
 
-        if session is not None:
-            self.pwarning("attempting to use existing session")
+        # if session is not None:
+        #    self.pwarning("attempting to use existing session")
 
         # Ensure we have an API token
         if api_token is None:
@@ -91,7 +98,21 @@ class HackTheBox(Cmd):
         # Aliases
         self.aliases["exit"] = "quit"
 
-    def twofactor_prompt(self) -> None:
+    @classmethod
+    def get(cls, *args, **kwargs) -> "HackTheBox":
+        """ Get the singleton object for the HackTheBox REPL
+        
+        :param args: Positional arguments passed directly to __init__
+        :param kwargs: Keyword arguments passed directly to __init__
+        :return: The singleton HackTheBox instance
+        """
+
+        if cls._singleton is None:
+            cls._singleton = HackTheBox(*args, **kwargs)
+
+        return cls._singleton
+
+    def twofactor_prompt(self) -> str:
         self.pwarning("One Time Password: ", end="")
         sys.stderr.flush()
         return self.read_input("")
@@ -125,8 +146,6 @@ class HackTheBox(Cmd):
         )
 
     jobs_parser = Cmd2ArgumentParser(description="Manage background scanner jobs")
-    jobs_parser.set_defaults(action="list")
-    jobs_subparsers = jobs_parser.add_subparsers(help="Actions", dest="_action")
 
     @cmd2.with_argparser(jobs_parser)
     @cmd2.with_category("Management")
@@ -136,14 +155,6 @@ class HackTheBox(Cmd):
         actions = {"list": self._jobs_list, "kill": self._jobs_kill}
         actions[args.action](args)
         return False
-
-    jobs_list_parser = jobs_subparsers.add_parser(
-        "list",
-        aliases=["ls"],
-        description="List background scanner jobs and their status",
-        prog="jobs list",
-    )
-    jobs_list_parser.set_defaults(action="list")
 
     def _jobs_list(self, args: argparse.Namespace) -> None:
         """ List the background scanner jobs """
@@ -173,15 +184,6 @@ class HackTheBox(Cmd):
 
         self.ppaged("\n".join(util.build_table(table)))
 
-    jobs_kill_parser = jobs_subparsers.add_parser(
-        "kill",
-        aliases=["rm", "stop"],
-        description="Stop a running background scanner job",
-        prog="jobs kill",
-    )
-    jobs_kill_parser.add_argument("job_id", type=int, help="Kill the identified job")
-    jobs_kill_parser.set_defaults(action="kill")
-
     def _jobs_kill(self, args: argparse.Namespace) -> None:
         """ Stop a running background scanner job """
 
@@ -203,8 +205,6 @@ class HackTheBox(Cmd):
     machine_parser = Cmd2ArgumentParser(
         description="View and manage active and retired machines"
     )
-    machine_parser.set_defaults(action="list")
-    machine_subparsers = machine_parser.add_subparsers(help="Actions", dest="_action")
 
     @cmd2.with_argparser(machine_parser)
     @cmd2.with_category("Hack the Box")
@@ -223,30 +223,6 @@ class HackTheBox(Cmd):
         }
         actions[args.action](args)
         return False
-
-    machine_list_parser = machine_subparsers.add_parser(
-        "list", aliases=["ls"], help="List machines", prog="machine list"
-    )
-    machine_list_parser.set_defaults(action="list")
-    machine_list_parser.add_argument(
-        "--inactive", "-i", action="store_const", const="inactive", dest="state"
-    )
-    machine_list_parser.add_argument(
-        "--active",
-        "-a",
-        action="store_const",
-        const="active",
-        dest="state",
-        default="all",
-    )
-    machine_list_parser.add_argument(
-        "--owned", "-o", action="store_const", const="owned", default="all"
-    )
-    machine_list_parser.add_argument(
-        "--unowned", "-u", action="store_const", const="unowned", dest="owned"
-    )
-    machine_list_parser.add_argument("--todo", "-t", action="store_true")
-    machine_list_parser.set_defaults(state="all", owned="all")
 
     def _machine_list(self, args: argparse.Namespace) -> None:
         """ List machines on hack the box """
@@ -288,11 +264,19 @@ class HackTheBox(Cmd):
         rating_color = [*([Fore.GREEN] * 3), *([Fore.YELLOW] * 4), *([Fore.RED] * 3)]
 
         # Build initial table with headers
-        table = [["", "", "Name", "Address", "Difficulty", "Rate", "Owned", "State"]]
+        table = [
+            ["", "", "OS", "Name", "Address", "Difficulty", "Rate", "Owned", "State"]
+        ]
 
         # Create the individual machine rows
         for m in machines:
             style = Style.DIM if m.owned_user and m.owned_root else ""
+
+            # Grab OS Icon
+            try:
+                os_icon = HackTheBox.OS_ICONS[m.os.lower()]
+            except KeyError:
+                os_icon = HackTheBox.OS_ICONS["other"]
 
             # Create scaled difficulty rating. Highest rated is full. Everything
             # else is scaled appropriately.
@@ -330,6 +314,7 @@ class HackTheBox(Cmd):
                 [
                     f"{style}{m.id}",
                     assigned,
+                    f"{os_icon} {m.os}",
                     m.name,
                     m.ip,
                     difficulty,
@@ -342,32 +327,14 @@ class HackTheBox(Cmd):
         # print data
         self.ppaged("\n".join(util.build_table(table)))
 
-    machine_start_parser = machine_subparsers.add_parser(
-        "start", aliases=["up", "spawn"], help="Start a machine", prog="machine up"
-    )
-    machine_start_parser.add_argument(
-        "machine", help="A name regex, IP address or machine ID to start"
-    )
-    machine_start_parser.set_defaults(action="start")
-
     def _machine_start(self, args: argparse.Namespace):
         """ Start a machine """
 
-        # Convert to integer, if possible. Otherwise pass as-is
-        try:
-            machine_id = int(args.machine)
-        except:
-            machine_id = args.machine
-
-        m = self.cnxn[machine_id]
+        m = args.machine
         a = self.cnxn.assigned
 
         if a is not None and a.name != m.name:
             self.perror(f"{a.name} already assigned to you")
-            return
-
-        if m is None:
-            self.perror(f"{machine_id}: no such machine")
             return
 
         if m.spawned:
@@ -377,30 +344,10 @@ class HackTheBox(Cmd):
         self.psuccess(f"starting {m.name}")
         m.spawned = True
 
-    machine_reset_parser = machine_subparsers.add_parser(
-        "reset",
-        aliases=["restart"],
-        help="Schedule a machine reset",
-        prog="machine reset",
-    )
-    machine_reset_parser.add_argument(
-        "machine", help="A name regex, IP address or machine ID"
-    )
-    machine_reset_parser.set_defaults(action="reset")
-
     def _machine_reset(self, args: argparse.Namespace) -> None:
         """ Stop an active machine """
 
-        # Convert to integer, if possible. Otherwise pass as-is
-        try:
-            machine_id = int(args.machine)
-        except:
-            machine_id = args.machine
-
-        m = self.cnxn[machine_id]
-        if m is None:
-            self.perror(f"{machine_id}: no such machine")
-            return
+        m = args.machine
 
         if not m.spawned:
             self.poutput(f"{m.name}: not running")
@@ -409,68 +356,15 @@ class HackTheBox(Cmd):
         self.psuccess(f"{m.name}: scheduling reset")
         m.resetting = True
 
-    machine_stop_parser = machine_subparsers.add_parser(
-        "stop", aliases=["down", "shutdown"], help="Stop a machine", prog="machine down"
-    )
-    machine_stop_group = machine_stop_parser.add_mutually_exclusive_group(required=True)
-    machine_stop_group.add_argument(
-        "--assigned",
-        "-a",
-        action="store_true",
-        help="Perform action on the currently assigned machine",
-        default=False,
-    )
-    machine_stop_group.add_argument(
-        "machine", nargs="?", help="A name regex, IP address or machine ID to start",
-    )
-    machine_stop_parser.set_defaults(action="stop")
-
     def _machine_stop(self, args: argparse.Namespace) -> None:
         """ Stop an active machine """
 
-        if args.assigned:
-            m = self.cnxn.assigned
-            if m is None:
-                self.perror(f"no currently assigned machine")
-                return
-        else:
-            # Convert to integer, if possible. Otherwise pass as-is
-            try:
-                machine_id = int(args.machine)
-            except:
-                machine_id = args.machine
-
-            try:
-                m = self.cnxn[machine_id]
-            except KeyError:
-                self.perror(f"{machine_id}: no such machine")
-                return
-
-        if not m.spawned:
-            self.poutput(f"{m.name} is not running")
+        if not args.machine.spawned:
+            self.poutput(f"{args.machine.name} is not running")
             return
 
-        self.psuccess(f"scheduling termination for {m.name}")
-        m.spawned = False
-
-    machine_info_parser = machine_subparsers.add_parser(
-        "info",
-        aliases=["cat", "show"],
-        help="Show detailed machine information",
-        prog="machine info",
-    )
-    machine_info_group = machine_info_parser.add_mutually_exclusive_group(required=True)
-    machine_info_group.add_argument(
-        "--assigned",
-        "-a",
-        action="store_true",
-        help="Perform action on the currently assigned machine",
-        default=False,
-    )
-    machine_info_group.add_argument(
-        "machine", nargs="?", help="A name regex, IP address or machine ID",
-    )
-    machine_info_parser.set_defaults(action="info")
+        self.psuccess(f"scheduling termination for {args.machine.name}")
+        args.machine.spawned = False
 
     def _machine_info(self, args: argparse.Namespace) -> None:
         """ Show detailed machine information 
@@ -480,23 +374,8 @@ class HackTheBox(Cmd):
             research some other python modules that may be able to help
         """
 
-        if args.assigned:
-            m = self.cnxn.assigned
-            if m is None:
-                self.perror(f"no currently assigned machine")
-                return
-        else:
-            # Convert to integer, if possible. Otherwise pass as-is
-            try:
-                machine_id = int(args.machine)
-            except:
-                machine_id = args.machine
-
-            try:
-                m = self.cnxn[machine_id]
-            except KeyError as e:
-                self.perror(f"{machine_id}: no such machine: {e}")
-                return
+        # Shorthand for args.machine
+        m = args.machine
 
         if m.spawned and not m.resetting and not m.terminating:
             state = f"{Fore.GREEN}up{Fore.RESET} for {m.expires}"
@@ -609,178 +488,34 @@ class HackTheBox(Cmd):
 
         self.ppaged("\n".join(output))
 
-    machine_own_parser = machine_subparsers.add_parser(
-        "own",
-        aliases=["submit", "shutdown"],
-        help="Submit a root or user flag",
-        prog="machine own",
-    )
-    machine_own_parser.add_argument(
-        "--rate",
-        "-r",
-        type=int,
-        default=0,
-        choices=range(1, 100),
-        help="Difficulty Rating (1-100)",
-    )
-    machine_own_group = machine_own_parser.add_mutually_exclusive_group(required=True)
-    machine_own_group.add_argument(
-        "--assigned",
-        "-a",
-        action="store_true",
-        help="Perform action on the currently assigned machine",
-        default=False,
-    )
-    machine_own_group.add_argument(
-        "machine", nargs="?", help="A name regex, IP address or machine ID",
-    )
-    machine_own_parser.add_argument("flag", help="The user or root flag")
-    machine_own_parser.set_defaults(action="own")
-
     def _machine_own(self, args: argparse.Namespace) -> None:
         """ Submit a machine own (user or root) """
 
-        if args.assigned:
-            m = self.cnxn.assigned
-            if m is None:
-                self.perror(f"no currently assigned machine")
-                return
-        else:
-            # Convert to integer, if possible. Otherwise pass as-is
-            try:
-                machine_id = int(args.machine)
-            except:
-                machine_id = args.machine
-
-            try:
-                m = self.cnxn[machine_id]
-            except KeyError:
-                self.perror(f"{machine_id}: no such machine")
-                return
-
-        if m.submit(args.flag, difficulty=args.rate):
-            self.psuccess(f"correct flag for {m.Name}!")
+        if args.machine.submit(args.flag, difficulty=args.rate):
+            self.psuccess(f"correct flag for {args.machine.Name}!")
         else:
             self.perror(f"incorrect flag")
-
-    machine_cancel_parser = machine_subparsers.add_parser(
-        "cancel",
-        description="Cancel a pending termination or reset for a machine",
-        prog="machine cancel",
-    )
-    machine_cancel_parser.add_argument(
-        "--termination",
-        "-t",
-        action="append_const",
-        const="t",
-        dest="cancel",
-        help="Cancel a machine termination",
-    )
-    machine_cancel_parser.add_argument(
-        "--reset",
-        "-r",
-        action="append_const",
-        const="r",
-        dest="cancel",
-        help="Cancel a machine reset",
-    )
-    machine_cancel_parser.add_argument(
-        "--both",
-        "-b",
-        action="store_const",
-        const=[],
-        dest="cancel",
-        help="Cancel machine reset and termination",
-    )
-    machine_cancel_group = machine_cancel_parser.add_mutually_exclusive_group(
-        required=True
-    )
-    machine_cancel_group.add_argument(
-        "--assigned",
-        "-a",
-        action="store_true",
-        help="Perform action on the currently assigned machine",
-        default=False,
-    )
-    machine_cancel_group.add_argument(
-        "machine", nargs="?", help="A name regex, IP address or machine ID",
-    )
-    machine_cancel_parser.set_defaults(action="cancel", cancel=[])
 
     def _machine_cancel(self, args: argparse.Namespace) -> None:
         """ Cancel pending termination or reset """
 
-        if args.assigned:
-            m = self.cnxn.assigned
-            if m is None:
-                self.perror(f"no currently assigned machine")
-                return
-        else:
-            # Convert to integer, if possible. Otherwise pass as-is
-            try:
-                machine_id = int(args.machine)
-            except:
-                machine_id = args.machine
-
-            try:
-                m = self.cnxn[machine_id]
-            except KeyError:
-                self.perror(f"{machine_id}: no such machine")
-                return
-
         if len(args.cancel) == 0 or "t" in args.cancel:
-            if m.terminating:
-                m.terminating = False
-                self.psuccess(f"{m.name}: pending termination cancelled")
+            if args.machine.terminating:
+                args.machine.terminating = False
+                self.psuccess(f"{args.machine.name}: pending termination cancelled")
         if len(args.cancel) == 0 or "r" in args.cancel:
-            if m.resetting:
-                m.resetting = False
-                self.psuccess(f"{m.name}: pending reset cancelled")
-
-    machine_enum_parser = machine_subparsers.add_parser(
-        "enum", aliases=["enumerate"], help="Perform initial service enumeration"
-    )
-    machine_enum_group = machine_enum_parser.add_mutually_exclusive_group(required=True)
-    machine_enum_group.add_argument(
-        "--assigned",
-        "-a",
-        action="store_true",
-        help="Perform action on the currently assigned machine",
-        default=False,
-    )
-    machine_enum_group.add_argument(
-        "machine", nargs="?", help="A name regex, IP address or machine ID to start",
-    )
-    machine_enum_parser.set_defaults(action="enum")
+            if args.machine.resetting:
+                args.machine.resetting = False
+                self.psuccess(f"{args.machine.name}: pending reset cancelled")
 
     def _machine_enum(self, args: argparse.Namespace) -> None:
         """ Perform initial service enumeration """
 
-        # Use the assigned machine if requested
-        if args.assigned:
-            m = self.cnxn.assigned
-            if m is None:
-                self.perror(f"no currently assigned machine")
-                return
-        else:
-            # Convert to integer, if possible. Otherwise pass as-is
-            try:
-                machine_id = int(args.machine)
-            except:
-                machine_id = args.machine
-
-            # Lookup the given machine id
-            try:
-                m = self.cnxn[machine_id]
-            except KeyError:
-                self.perror(f"{machine_id}: no such machine")
-                return
-
-        if m.analysis_path is None:
+        if args.machine.analysis_path is None:
             self.pwarning("initializing analysis structure")
 
             try:
-                m.init(self.cnxn.analysis_path)
+                args.machine.init(self.cnxn.analysis_path)
             # except OSError as e:
             #     self.perror(f"failed to create directory structure: {e}")
             #     return
@@ -788,75 +523,24 @@ class HackTheBox(Cmd):
                 self.perror("failed to add host to /etc/hosts")
                 return
 
-        if len(m.services) == 0:
+        if len(args.machine.services) == 0 or args.force:
             self.poutput("enumerating machine services")
             try:
-                m.enumerate()
+                args.machine.enumerate()
             except MasscanFailed:
                 self.perror("masscan failed")
             except NmapFailed:
                 self.perror("nmap failed")
         else:
             self.poutput(
-                f"{m.name} already enumerated ({len(m.services)} service(s) detected)"
+                f"{args.machine.name} already enumerated ({len(args.machine.services)} service(s) detected)"
             )
-
-    machine_scan_parser = machine_subparsers.add_parser(
-        "scan",
-        help="Perform prepared applicable scans against this host",
-        prog="machine scan",
-    )
-    machine_scan_parser.add_argument(
-        "--service",
-        "-v",
-        help="Only run scans for this service (format: `{PORT}/{PROTOCOL}`)",
-    )
-    machine_scan_parser.add_argument(
-        "--scanner", "-s", help="Only run scans for this scanner"
-    )
-    machine_scan_parser.add_argument(
-        "--recommended", "-r", help="Run all recommended scans"
-    )
-    machine_scan_parser.add_argument(
-        "--background",
-        "-b",
-        help="Run scans in the background",
-        action="store_true",
-        default=False,
-    )
-    machine_scan_group = machine_scan_parser.add_mutually_exclusive_group(required=True)
-    machine_scan_group.add_argument(
-        "--assigned",
-        "-a",
-        action="store_true",
-        help="Perform action on the currently assigned machine",
-        default=False,
-    )
-    machine_scan_group.add_argument(
-        "machine", nargs="?", help="A name regex, IP address or machine ID to start",
-    )
-    machine_scan_parser.set_defaults(action="scan")
 
     def _machine_scan(self, args: argparse.Namespace) -> None:
         """ Scan the open service for the given machine """
 
-        if args.assigned:
-            m = self.cnxn.assigned
-            if m is None:
-                self.perror(f"no currently assigned machine")
-                return
-        else:
-            # Convert to integer, if possible. Otherwise pass as-is
-            try:
-                machine_id = int(args.machine)
-            except:
-                machine_id = args.machine
-
-            try:
-                m = self.cnxn[machine_id]
-            except KeyError:
-                self.perror(f"{machine_id}: no such machine")
-                return
+        # args.machine shorthand
+        m = args.machine
 
         if args.recommended:
             scanners = [s for s in AVAILABLE_SCANNERS if s.recommended and s.match(m)]
@@ -964,8 +648,6 @@ class HackTheBox(Cmd):
 
     # Argument parser for `machine` command
     lab_parser = Cmd2ArgumentParser(description="View and manage lab VPN connection")
-    lab_parser.set_defaults(action="status")
-    lab_subparsers = lab_parser.add_subparsers(help="Actions", dest="_action")
 
     @cmd2.with_argparser(lab_parser)
     @cmd2.with_category("Hack the Box")
@@ -981,13 +663,6 @@ class HackTheBox(Cmd):
         }
         actions[args.action](args)
         return False
-
-    lab_status_parser = lab_subparsers.add_parser(
-        "status",
-        description="Show the connection status of the currently assigned lab VPN",
-        prog="lab status",
-    )
-    lab_status_parser.set_defaults(action="status")
 
     def _lab_status(self, args: argparse.Namespace) -> None:
         """ Print the lab VPN status """
@@ -1020,16 +695,6 @@ class HackTheBox(Cmd):
 
         self.poutput("\n".join(output))
 
-    lab_switch_parser = lab_subparsers.add_parser(
-        "switch",
-        description="Show the connection status of the currently assigned lab VPN",
-        prog="lab switch",
-    )
-    lab_switch_parser.add_argument(
-        "lab", choices=VPN.VALID_LABS, type=str, help="The lab to switch to"
-    )
-    lab_switch_parser.set_defaults(action="switch")
-
     def _lab_switch(self, args: argparse.Namespace) -> None:
         """ Switch labs """
         try:
@@ -1039,30 +704,12 @@ class HackTheBox(Cmd):
         else:
             self.psuccess(f"lab switched to {args.lab}")
 
-    lab_config_parser = lab_subparsers.add_parser(
-        "config", description="Download OVPN configuration file", prog="lab config",
-    )
-    lab_config_parser.set_defaults(action="config")
-
     def _lab_config(self, args: argparse.Namespace) -> None:
         """ Download OVPN configuration file """
         try:
             self.poutput(self.cnxn.lab.config.decode("utf-8"), apply_style=False)
         except AuthFailure:
             self.perror("authentication failure (did you supply email/password?)")
-
-    lab_connect_parser = lab_subparsers.add_parser(
-        "connect",
-        description="Connect to the Hack the Box VPN. If no previous configuration has been created in NetworkManager, it attempts to download it and import it.",
-        prog="lab connect",
-    )
-    lab_connect_parser.add_argument(
-        "--update",
-        "-u",
-        action="store_true",
-        help="Force a redownload/import of the OpenVPN configuration",
-    )
-    lab_connect_parser.set_defaults(action="connect")
 
     def _lab_connect(self, args: argparse.Namespace) -> None:
         """ Connect to the Hack the Box VPN using NetworkManager """
@@ -1121,13 +768,6 @@ class HackTheBox(Cmd):
             f"connected w/ ipv4 address: {active_connection.Ip4Config.Addresses[0][0]}/{active_connection.Ip4Config.Addresses[0][1]}"
         )
 
-    lab_disconnect_parser = lab_subparsers.add_parser(
-        "disconnect",
-        description="Disconnect from the Hack the Box lab VPN",
-        prog="lab disconnect",
-    )
-    lab_disconnect_parser.set_defaults(action="disconnect")
-
     def _lab_disconnect(self, args: argparse.Namespace) -> None:
         """ Disconnect from Hack the Box VPN via Network Manager """
 
@@ -1142,22 +782,6 @@ class HackTheBox(Cmd):
                 break
         else:
             self.poutput("vpn connection not active or not found")
-
-    lab_import_parser = lab_subparsers.add_parser(
-        "import",
-        description="Import your OpenVPN configuration into Network Manager",
-        prog="lab import",
-    )
-    lab_import_parser.add_argument(
-        "--reload",
-        "-r",
-        action="store_true",
-        help="Reload configuration from Hack the Box",
-    )
-    lab_import_parser.add_argument(
-        "--name", "-n", default="python-htb", help="NetworkManager Connection ID"
-    )
-    lab_import_parser.set_defaults(action="import")
 
     def _lab_import(self, args: argparse.Namespace) -> None:
         """ Import OpenVPN configuration into NetworkManager """
@@ -1261,6 +885,71 @@ class HackTheBox(Cmd):
         self.cnxn.invalidate_cache()
 
 
+def complete_machine(
+    self, running=None, active=None, term_or_reset=None
+) -> List[cmd2.argparse_custom.CompletionItem]:
+    """ Return a list of CompletionItems for machines """
+    result = []
+    for m in self.cnxn.machines:
+        # Match active
+        if active is not None and m.expired == active:
+            continue
+        # Match running
+        if running is not None and m.spawned != running:
+            continue
+        # Match terminating or resetting
+        if term_or_reset is not None and not m.terminating and not m.resetting:
+            continue
+
+        if m.resetting:
+            state = "resetting"
+        elif m.terminating:
+            state = "terminating"
+        elif m.spawned:
+            state = m.expires
+        else:
+            state = "stopped"
+
+        os = f"{HackTheBox.OS_ICONS.get(m.os.lower(), HackTheBox.OS_ICONS['other'])} {m.os}"
+        result.append(cmd2.CompletionItem(m.name.lower(), f"{os:<13}{m.ip:<13}{state}"))
+
+    return result
+
+
+MACHINE_DESCRIPTION = f"{'OS':<13}{'IP':<13}State"
+
+
+def ArgparseMachineType(arg: str) -> Machine:
+    """
+
+    :param arg: The argument passed at the command line
+    :type arg: str
+    :return: A machine object or raises invalid argument error
+    :raises: argparse.ArgumentTypeError
+    """
+
+    # We know it has already been configured, no params needed
+    self = HackTheBox.get()
+
+    if arg == HackTheBox.ASSIGNED:
+        m = self.cnxn.assigned
+        if m is None:
+            raise argparse.ArgumentTypeError(f"no currently assigned machine")
+    else:
+        # Convert to integer, if possible. Otherwise pass as-is
+        try:
+            machine_id = int(arg)
+        except ValueError:
+            machine_id = arg
+
+        try:
+            m = self.cnxn[machine_id]
+        except KeyError:
+            raise argparse.ArgumentTypeError(f"{machine_id}: no such machine")
+
+    return m
+
+
 def main():
 
     if "HTBRC" in os.environ:
@@ -1268,12 +957,324 @@ def main():
     else:
         config = "~/.htbrc"
 
+    # Setup the job parser for the cmd2 object
+    HackTheBox.jobs_parser.set_defaults(action="list")
+    jobs_subparsers = HackTheBox.jobs_parser.add_subparsers(
+        help="Actions", dest="_action"
+    )
+
+    # "job kill" parser
+    jobs_kill_parser = jobs_subparsers.add_parser(
+        "kill",
+        aliases=["rm", "stop"],
+        description="Stop a running background scanner job",
+        prog="jobs kill",
+    )
+    jobs_kill_parser.add_argument("job_id", type=int, help="Kill the identified job")
+    jobs_kill_parser.set_defaults(action="kill")
+
+    # "job list" parser
+    jobs_list_parser = jobs_subparsers.add_parser(
+        "list",
+        aliases=["ls"],
+        description="List background scanner jobs and their status",
+        prog="jobs list",
+    )
+    jobs_list_parser.set_defaults(action="list")
+
+    # "machine" argument parser
+    # HackTheBox.machine_parser.set_defaults(action="list")
+    machine_subparsers = HackTheBox.machine_parser.add_subparsers(
+        help="Actions", dest="_action"
+    )
+
+    # "machine list" argument parser
+    machine_list_parser = machine_subparsers.add_parser(
+        "list", aliases=["ls"], help="List machines", prog="machine list"
+    )
+    machine_list_parser.set_defaults(action="list")
+    machine_list_parser.add_argument(
+        "--inactive", "-i", action="store_const", const="inactive", dest="state"
+    )
+    machine_list_parser.add_argument(
+        "--active",
+        "-a",
+        action="store_const",
+        const="active",
+        dest="state",
+        default="all",
+    )
+    machine_list_parser.add_argument(
+        "--owned", "-o", action="store_const", const="owned", default="all"
+    )
+    machine_list_parser.add_argument(
+        "--unowned", "-u", action="store_const", const="unowned", dest="owned"
+    )
+    machine_list_parser.add_argument("--todo", "-t", action="store_true")
+    machine_list_parser.set_defaults(state="all", owned="all")
+
+    # "machine start" argument parser
+    machine_start_parser = machine_subparsers.add_parser(
+        "start", aliases=["up", "spawn"], help="Start a machine", prog="machine up"
+    )
+    machine_start_parser.add_argument(
+        "machine",
+        help="A name regex, IP address or machine ID to start",
+        type=ArgparseMachineType,
+        choices_method=functools.partial(complete_machine, running=False),
+        descriptive_header=MACHINE_DESCRIPTION,
+    )
+    machine_start_parser.set_defaults(action="start")
+
+    # "machine reset" argument parser
+    machine_reset_parser = machine_subparsers.add_parser(
+        "reset",
+        aliases=["restart"],
+        help="Schedule a machine reset",
+        prog="machine reset",
+    )
+    machine_reset_parser.add_argument(
+        "machine",
+        help="A name regex, IP address or machine ID",
+        type=ArgparseMachineType,
+        choices_method=functools.partial(complete_machine, running=True),
+        descriptive_header=MACHINE_DESCRIPTION,
+    )
+    machine_reset_parser.set_defaults(action="reset")
+
+    # "machine stop" argument parser
+    machine_stop_parser = machine_subparsers.add_parser(
+        "stop", aliases=["down", "shutdown"], help="Stop a machine", prog="machine down"
+    )
+    machine_stop_parser.add_argument(
+        "machine",
+        nargs="?",
+        help="A name regex, IP address or machine ID to start (default: assigned)",
+        default=HackTheBox.ASSIGNED,
+        type=ArgparseMachineType,
+        choices_method=functools.partial(complete_machine, running=False),
+        descriptive_header=MACHINE_DESCRIPTION,
+    )
+    machine_stop_parser.set_defaults(action="stop")
+
+    # "machine info" argument parser
+    machine_info_parser = machine_subparsers.add_parser(
+        "info",
+        aliases=["cat", "show"],
+        help="Show detailed machine information",
+        prog="machine info",
+    )
+    machine_info_parser.add_argument(
+        "machine",
+        nargs="?",
+        help="A name regex, IP address or machine ID (default: assigned)",
+        default=HackTheBox.ASSIGNED,
+        type=ArgparseMachineType,
+        choices_method=complete_machine,
+        descriptive_header=MACHINE_DESCRIPTION,
+    )
+    machine_info_parser.set_defaults(action="info")
+
+    # "machine own" argument parser
+    machine_own_parser = machine_subparsers.add_parser(
+        "own",
+        aliases=["submit", "shutdown"],
+        help="Submit a root or user flag",
+        prog="machine own",
+    )
+    machine_own_parser.add_argument(
+        "--rate",
+        "-r",
+        type=int,
+        default=0,
+        choices=range(1, 100),
+        help="Difficulty Rating (1-100)",
+    )
+    machine_own_parser.add_argument(
+        "machine",
+        nargs="?",
+        help="A name regex, IP address or machine ID (default: assigned)",
+        default=HackTheBox.ASSIGNED,
+        type=ArgparseMachineType,
+        choices_method=complete_machine,
+        descriptive_header=MACHINE_DESCRIPTION,
+    )
+    machine_own_parser.add_argument("flag", help="The user or root flag")
+    machine_own_parser.set_defaults(action="own")
+
+    # "machine cancel" argument parser
+    machine_cancel_parser = machine_subparsers.add_parser(
+        "cancel",
+        description="Cancel a pending termination or reset for a machine",
+        prog="machine cancel",
+    )
+    machine_cancel_parser.add_argument(
+        "--termination",
+        "-t",
+        action="append_const",
+        const="t",
+        dest="cancel",
+        help="Cancel a machine termination",
+    )
+    machine_cancel_parser.add_argument(
+        "--reset",
+        "-r",
+        action="append_const",
+        const="r",
+        dest="cancel",
+        help="Cancel a machine reset",
+    )
+    machine_cancel_parser.add_argument(
+        "--both",
+        "-b",
+        action="store_const",
+        const=[],
+        dest="cancel",
+        help="Cancel machine reset and termination",
+    )
+    machine_cancel_parser.add_argument(
+        "machine",
+        nargs="?",
+        help="A name regex, IP address or machine ID (default: assigned)",
+        default=HackTheBox.ASSIGNED,
+        type=ArgparseMachineType,
+        choices_method=functools.partial(complete_machine, term_or_reset=True),
+        descriptive_header=MACHINE_DESCRIPTION,
+    )
+    machine_cancel_parser.set_defaults(action="cancel", cancel=[])
+
+    # "machine enum" argument parser
+    machine_enum_parser = machine_subparsers.add_parser(
+        "enum", aliases=["enumerate"], help="Perform initial service enumeration"
+    )
+    machine_enum_parser.add_argument(
+        "--force", "-f", action="store_true", help="Force re-enumeration", default=False
+    )
+    machine_enum_parser.add_argument(
+        "machine",
+        nargs="?",
+        help="A name regex, IP address or machine ID to start (default: assigned)",
+        default=HackTheBox.ASSIGNED,
+        type=ArgparseMachineType,
+        choices_method=complete_machine,
+        descriptive_header=MACHINE_DESCRIPTION,
+    )
+    machine_enum_parser.set_defaults(action="enum")
+
+    # "machine scan" argument parser
+    machine_scan_parser = machine_subparsers.add_parser(
+        "scan",
+        help="Perform prepared applicable scans against this host",
+        prog="machine scan",
+    )
+    machine_scan_parser.add_argument(
+        "--service",
+        "-v",
+        help="Only run scans for this service (format: `{PORT}/{PROTOCOL}`)",
+    )
+    machine_scan_parser.add_argument(
+        "--scanner", "-s", help="Only run scans for this scanner"
+    )
+    machine_scan_parser.add_argument(
+        "--recommended", "-r", help="Run all recommended scans"
+    )
+    machine_scan_parser.add_argument(
+        "--background",
+        "-b",
+        help="Run scans in the background",
+        action="store_true",
+        default=False,
+    )
+    machine_scan_parser.add_argument(
+        "machine",
+        nargs="?",
+        help="A name regex, IP address or machine ID to start (default: assigned)",
+        default=HackTheBox.ASSIGNED,
+        type=ArgparseMachineType,
+        choices_method=complete_machine,
+        descriptive_header=MACHINE_DESCRIPTION,
+    )
+    machine_scan_parser.set_defaults(action="scan")
+
+    # "lab" argument parser setup
+    HackTheBox.lab_parser.set_defaults(action="status")
+    lab_subparsers = HackTheBox.lab_parser.add_subparsers(
+        help="Actions", dest="_action"
+    )
+
+    # "lab status" argument parser
+    lab_status_parser = lab_subparsers.add_parser(
+        "status",
+        description="Show the connection status of the currently assigned lab VPN",
+        prog="lab status",
+    )
+    lab_status_parser.set_defaults(action="status")
+
+    # "lab switch" argument parser
+    lab_switch_parser = lab_subparsers.add_parser(
+        "switch",
+        description="Show the connection status of the currently assigned lab VPN",
+        prog="lab switch",
+    )
+    lab_switch_parser.add_argument(
+        "lab", choices=VPN.VALID_LABS, type=str, help="The lab to switch to"
+    )
+    lab_switch_parser.set_defaults(action="switch")
+
+    # "lab config" argument parser
+    lab_config_parser = lab_subparsers.add_parser(
+        "config", description="Download OVPN configuration file", prog="lab config",
+    )
+    lab_config_parser.set_defaults(action="config")
+
+    # "lab connect" argument parser
+    lab_connect_parser = lab_subparsers.add_parser(
+        "connect",
+        description="Connect to the Hack the Box VPN. If no previous configuration has been created in NetworkManager, it attempts to download it and import it.",
+        prog="lab connect",
+    )
+    lab_connect_parser.add_argument(
+        "--update",
+        "-u",
+        action="store_true",
+        help="Force a redownload/import of the OpenVPN configuration",
+    )
+    lab_connect_parser.set_defaults(action="connect")
+
+    # "lab disconnect" argument parser
+    lab_disconnect_parser = lab_subparsers.add_parser(
+        "disconnect",
+        description="Disconnect from the Hack the Box lab VPN",
+        prog="lab disconnect",
+    )
+    lab_disconnect_parser.set_defaults(action="disconnect")
+
+    # "lab import" argument parser
+    lab_import_parser = lab_subparsers.add_parser(
+        "import",
+        description="Import your OpenVPN configuration into Network Manager",
+        prog="lab import",
+    )
+    lab_import_parser.add_argument(
+        "--reload",
+        "-r",
+        action="store_true",
+        help="Reload configuration from Hack the Box",
+    )
+    lab_import_parser.add_argument(
+        "--name", "-n", default="python-htb", help="NetworkManager Connection ID"
+    )
+    lab_import_parser.set_defaults(action="import")
+
     # Build REPL object
-    cmd = HackTheBox(resource=config, allow_cli_args=False)
+    cmd = HackTheBox.get(resource=config, allow_cli_args=False)
 
     # Run remaning arguments as a command
     if len(sys.argv) > 1:
-        cmd.onecmd(" ".join([shlex.quote(x) for x in sys.argv[1:]]))
+        try:
+            cmd.onecmd(" ".join([shlex.quote(x) for x in sys.argv[1:]]))
+        except cmd2.exceptions.Cmd2ArgparseError:
+            sys.exit(1)
         if len([j for j in cmd.jobs if j.thread is not None]):
             cmd.pwarning("background jobs active. staring interpreter...")
             result = cmd.cmdloop()
@@ -1311,8 +1312,7 @@ def main():
         cmd.config.write(f)
 
     for m in cmd.cnxn.machines:
-        if m.dump():
-            cmd.poutput(f"saved enumeration data for {m.name}")
+        m.dump()
 
 
 if __name__ == "__main__":

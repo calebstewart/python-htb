@@ -70,7 +70,10 @@ def build_table(data: List[List[str]], highlight=True) -> List[str]:
             # Justify fake input to avoid issues with formatting
             row.append(f"{placeholder:{justify}{w}}")
             # Insert correct input after justification
-            row[-1] = style + row[-1].replace(placeholder, data[r][c]) + Style.RESET_ALL
+            row[-1] = style + row[-1].replace(placeholder, data[r][c])
+
+            if highlight and r == 0:
+                row[-1] += Style.RESET_ALL
 
         # Build this row
         output.append(" ".join(row))

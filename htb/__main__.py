@@ -82,6 +82,7 @@ class HackTheBox(Cmd):
             existing_session=session,
             analysis_path=self.config["htb"].get("analysis_path", "~/htb"),
             twofactor_prompt=self.twofactor_prompt,
+            subscribe=True,
         )
 
         self.prompt = (
@@ -98,6 +99,8 @@ class HackTheBox(Cmd):
         # Aliases
         self.aliases["exit"] = "quit"
 
+        self.cnxn.subscribe("repl", self._on_notification)
+
     @classmethod
     def get(cls, *args, **kwargs) -> "HackTheBox":
         """ Get the singleton object for the HackTheBox REPL
@@ -111,6 +114,20 @@ class HackTheBox(Cmd):
             cls._singleton = HackTheBox(*args, **kwargs)
 
         return cls._singleton
+
+    def _on_notification(self, message):
+        """ Display notification information from a asynchronous update """
+
+        server = "-".join(self.cnxn.lab.hostname.split(".")[0].split("-")[1:])
+
+        # Ignore messages for other servers
+        if message["server"] != server:
+            return True
+
+        with self.terminal_lock:
+            self.async_alert(message["title"].lower().split("]")[1])
+
+        return True
 
     def twofactor_prompt(self) -> str:
         self.pwarning("One Time Password: ", end="")
@@ -137,6 +154,11 @@ class HackTheBox(Cmd):
         super(HackTheBox, self).pwarning(
             msg, end=end, apply_style=False,
         )
+
+    def async_alert(self, msg: str, new_prompt: str = None):
+        """ Asynchronous alert, and redraw prompt """
+        msg = f"[{Style.BRIGHT+Fore.YELLOW}!{Style.RESET_ALL}] {msg}"
+        super(HackTheBox, self).async_alert(msg, new_prompt)
 
     def perror(self, msg: Any = "", end: str = "\n", apply_style: bool = True) -> None:
         if apply_style:
@@ -288,7 +310,7 @@ class HackTheBox(Cmd):
             difficulty = ""
             for i, r in enumerate(ratings):
                 difficulty += rating_color[i] + rating_char[round(r * 6)]
-            difficulty += Style.RESET_ALL
+            difficulty += Style.RESET_ALL + style
 
             # "$" for user and "#" for root
             owned = f"^{'$' if m.owned_user else ' '} {'#' if m.owned_root else ' '}"
@@ -983,7 +1005,9 @@ def main():
     jobs_list_parser.set_defaults(action="list")
 
     # "machine" argument parser
-    # HackTheBox.machine_parser.set_defaults(action="list")
+    HackTheBox.machine_parser.set_defaults(
+        action="list", state="all", owned="all", todo=None
+    )
     machine_subparsers = HackTheBox.machine_parser.add_subparsers(
         help="Actions", dest="_action"
     )
@@ -1275,6 +1299,8 @@ def main():
             cmd.onecmd(" ".join([shlex.quote(x) for x in sys.argv[1:]]))
         except cmd2.exceptions.Cmd2ArgparseError:
             sys.exit(1)
+        except RequestFailed as r:
+            cmd.perror(f"request failed: {r}")
         if len([j for j in cmd.jobs if j.thread is not None]):
             cmd.pwarning("background jobs active. staring interpreter...")
             result = cmd.cmdloop()

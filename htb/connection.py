@@ -1,7 +1,10 @@
 #!/usr/bin/env python3
 from typing import Any, Dict, List, Union, Callable
+import websockets
+import threading
 import requests
 import time
+import json
 import re
 
 from htb.exceptions import *
@@ -22,6 +25,7 @@ class Connection(object):
         existing_session=None,
         analysis_path=None,
         twofactor_prompt: Callable = None,
+        subscribe: bool = False,
     ):
         """ Construct a connection with the specified API key """
 
@@ -48,6 +52,49 @@ class Connection(object):
 
         # Path where machine analysis is kept
         self.analysis_path = analysis_path
+
+        # Subscribe the asynchronous messages via WebSockets
+        if subscribe:
+            import pysher
+
+            self.subcribed: bool = True
+            self.subscriber_lock: threading.Lock = threading.RLock()
+            self.subscribers: Dict[str, Callable] = {}
+            self.pusher = pysher.Pusher("97608bf7532e6f0fe898", cluster="eu")
+
+            def _on_connect(data):
+                channel = self.pusher.subscribe("notifications-channel")
+                channel.bind("display-notification", self._on_notification)
+
+            self.pusher.connection.bind("pusher:connection_established", _on_connect)
+            self.pusher.connect()
+
+    def _on_notification(self, *args, **kwargs) -> None:
+        """ Receive notifications from Hack the Box and distribute them to
+        subscribers """
+        message = json.loads(args[0])
+        subscribers = {}
+        for name, callback in self.subscribers.items():
+            if callback(message):
+                subscribers[name] = callback
+
+    def subscribe(self, name: str, subscriber: Callable) -> None:
+        """ Subscribe to notification messages """
+
+        with self.subscriber_lock:
+            if name in self.subscribers:
+                raise ValueError(f"{name}: already registered subscriber")
+
+            self.subscribers[name] = subscriber
+
+    def unsubscribe(self, name: str) -> None:
+        """ Unsubscribe from notification messages """
+
+        with self.subscriber_lock:
+            if name not in self.subscribers:
+                raise KeyError(f"{name} not a registered subscriber")
+
+            del self.subscribers[name]
 
     def invalidate_cache(self, endpoint: str = None, method: str = None) -> None:
         """ Invalidate the cache of one endpoint, endpoint/method or all entries """

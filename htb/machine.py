@@ -248,10 +248,13 @@ class Machine(object):
         r = self.connection._api(
             "/machines/own",
             method="post",
-            json={"flag": flag, "difficulty": difficulty, "id": self.id},
+            json={"flag": flag, "difficulty": int(difficulty), "id": self.id},
         )
 
-        return int(r["success"]) != 0
+        if r["success"] == 0:
+            raise RequestFailed(r["status"])
+
+        return True
 
     def extend(self) -> bool:
         """ Extend machine uptime """

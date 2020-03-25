@@ -451,8 +451,8 @@ class Machine(object):
 
         self.services = []
         for l in services_list:
-            for s in l.split(","):
-                self.services.append(Service.from_nmap(s.strip()))
+            for s in l.split("/, "):
+                self.services.append(Service.from_nmap((s+"/").strip()))
 
         # Ensure we write the services out
         self.dump()

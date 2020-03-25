@@ -166,7 +166,6 @@ class Scanner(object):
         tracker.lock.acquire()
 
         for status in generator:
-            print(f"GOT STATUS {status}")
             tracker.status = status
             if tracker.stop:
                 self.cancel(tracker)

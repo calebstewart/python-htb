@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
 from typing import Any, Dict, List, Union, Callable
-import websockets
 import threading
 import requests
 import time
@@ -53,8 +52,9 @@ class Connection(object):
         # Path where machine analysis is kept
         self.analysis_path = analysis_path
 
-        # Subscribe the asynchronous messages via WebSockets
+        # Subscribe the asynchronous messages via Pusher (WebSockets)
         if subscribe:
+            # If you don't subscribe, you don't need pysher
             import pysher
 
             self.subcribed: bool = True

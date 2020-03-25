@@ -355,16 +355,19 @@ class HackTheBox(Cmd):
         m = args.machine
         a = self.cnxn.assigned
 
-        if a is not None and a.name != m.name:
-            self.perror(f"{a.name} already assigned to you")
+        if m.spawned and self.cnxn.assigned is None:
+            self.poutput(f"{m.name}: machine already running, transferring ownership...")
+            m.assigned = True
             return
-
-        if m.spawned:
-            self.poutput(f"{m.name}: already running. did you mean 'transfer'?")
+        elif m.spawned and self.cnxn.assigned is not None:
+            self.poutput(f"unable to transfer machine. {self.cnxn.assigned.name} is currently assigned.")
             return
 
         self.psuccess(f"starting {m.name}")
-        m.spawned = True
+        try:
+            m.spawned = True
+        except RequestFailed as e:
+            self.perror(f"request failed: {e}")
 
     def _machine_reset(self, args: argparse.Namespace) -> None:
         """ Stop an active machine """

@@ -510,6 +510,19 @@ class HackTheBox(Cmd):
         output.append(
             f"{Style.BRIGHT}{'Blood':<6}{Style.RESET_ALL}{m.blood['user']['name']:<{user_width}}{m.blood['root']['name']}"
         )
+        
+        if len(m.services):
+            output.append("")
+            
+            table = [["Port", "Protocol", "Name", "Version"]]
+            for service in m.services:
+                table.append([f"{service.port}", f"{service.protocol}", service.name, ""])
+            
+            output.extend(util.build_table(table))
+        else:
+            output.append("")
+            output.append(f"{Style.BRIGHT}No enumerated services.{Style.RESET_ALL}")
+            
 
         self.ppaged("\n".join(output))
 
@@ -535,6 +548,36 @@ class HackTheBox(Cmd):
 
     def _machine_enum(self, args: argparse.Namespace) -> None:
         """ Perform initial service enumeration """
+        
+        if not args.machine.spawned:
+            if self.cnxn.assigned is not None:
+                # We can't assign this machine, if we already have a machine assigned.
+                self.pwarning(f"unable to start {args.machine.name}. {self.cnxn.assigned.name} is already assigned.")
+                return
+            else:
+                # Start the machine if we don't have a machine assigned
+                self.pwarning(f"starting {args.machine.name}")
+                args.machine.spawned = True
+                
+                # Ensure the device is up before we scan
+                self.pwarning(f"waiting for machine to respond to ping...")
+                try:
+                    # Wait for a positive ping response
+                    while True:
+                        if subprocess.call(["ping", "-c", "1", args.machine.ip], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL) == 0:
+                            self.psuccess(f"received ping response!")
+                            break
+                        time.sleep(5)
+                except KeyboardInterrupt:
+                    self.perror("no ping response received. cancelling enumeration.")
+                    return
+                else:
+                    # Give the machine some time to start services after networking comes up
+                    self.poutput(f"waiting for services to start...")
+                    time.sleep(10)
+                    
+                # Ensure we grab the newest machine status
+                self.cnxn.invalidate_cache()
 
         if args.machine.analysis_path is None:
             self.pwarning("initializing analysis structure")

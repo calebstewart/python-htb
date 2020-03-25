@@ -545,39 +545,46 @@ class HackTheBox(Cmd):
             if args.machine.resetting:
                 args.machine.resetting = False
                 self.psuccess(f"{args.machine.name}: pending reset cancelled")
+    
+    def wait_for_machine(self, machine: Machine) -> bool:
+    
+        # Start the machine if we don't have a machine assigned
+        self.pwarning(f"starting {machine.name}")
+        machine.spawned = True
+    
+        # Ensure the device is up before we scan
+        self.pwarning(f"waiting for machine to respond to ping...")
+        try:
+            # Wait for a positive ping response
+            while True:
+                if subprocess.call(["ping", "-c", "1", machine.ip], stdout=subprocess.DEVNULL,
+                                   stderr=subprocess.DEVNULL) == 0:
+                    self.psuccess(f"received ping response!")
+                    break
+                time.sleep(5)
+        except KeyboardInterrupt:
+            self.perror("no ping response received. cancelling enumeration.")
+            return False
+        else:
+            # Give the machine some time to start services after networking comes up
+            self.poutput(f"waiting for services to start...")
+            time.sleep(10)
+    
+        # Ensure we grab the newest machine status
+        self.cnxn.invalidate_cache()
+        
+        return True
 
     def _machine_enum(self, args: argparse.Namespace) -> None:
         """ Perform initial service enumeration """
-        
+    
         if not args.machine.spawned:
             if self.cnxn.assigned is not None:
                 # We can't assign this machine, if we already have a machine assigned.
                 self.pwarning(f"unable to start {args.machine.name}. {self.cnxn.assigned.name} is already assigned.")
                 return
-            else:
-                # Start the machine if we don't have a machine assigned
-                self.pwarning(f"starting {args.machine.name}")
-                args.machine.spawned = True
-                
-                # Ensure the device is up before we scan
-                self.pwarning(f"waiting for machine to respond to ping...")
-                try:
-                    # Wait for a positive ping response
-                    while True:
-                        if subprocess.call(["ping", "-c", "1", args.machine.ip], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL) == 0:
-                            self.psuccess(f"received ping response!")
-                            break
-                        time.sleep(5)
-                except KeyboardInterrupt:
-                    self.perror("no ping response received. cancelling enumeration.")
-                    return
-                else:
-                    # Give the machine some time to start services after networking comes up
-                    self.poutput(f"waiting for services to start...")
-                    time.sleep(10)
-                    
-                # Ensure we grab the newest machine status
-                self.cnxn.invalidate_cache()
+            elif not self.wait_for_machine(args.machine):
+                return
 
         if args.machine.analysis_path is None:
             self.pwarning("initializing analysis structure")
@@ -609,6 +616,13 @@ class HackTheBox(Cmd):
 
         # args.machine shorthand
         m = args.machine
+        
+        if not m.spawned:
+            if self.cnxn.assigned is not None:
+                self.perror(f"unable to start {m.name}. {self.cnxn.assigned.name} is currently assigned.")
+                return
+            elif not self.wait_for_machine(m):
+                return
 
         if args.recommended:
             scanners = [s for s in AVAILABLE_SCANNERS if s.recommended and s.match(m)]

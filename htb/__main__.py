@@ -692,7 +692,7 @@ class HackTheBox(Cmd):
 
         # Setup local event queue for completion
         events = queue.Queue()
-        tracker.job_events = events
+        tracker.events = events
         tracker.lock.release()
 
         # Exception used when C-z is pressed to background a task
@@ -710,7 +710,7 @@ class HackTheBox(Cmd):
             signal.signal(signal.SIGTSTP, background_me)
 
             try:
-                tracker = tracker.job_events.get()
+                tracker = tracker.events.get()
             except KeyboardInterrupt:
                 self.pwarning(
                     f"cancelling {tracker.scanner.name} for {tracker.service.port}/{tracker.service.protocol}"

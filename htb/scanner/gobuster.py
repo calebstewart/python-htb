@@ -39,7 +39,18 @@ class GobusterScanner(Scanner):
 
         # Call gobuster
         tracker.data["popen"] = subprocess.Popen(
-            ["gobuster", "-w", wordlist, "-f", "-k", "-o", output_path, "-u", url],
+            [
+                "gobuster",
+                "dir",
+                "-w",
+                wordlist,
+                "-f",
+                "-k",
+                "-o",
+                output_path,
+                "-u",
+                url,
+            ],
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             preexec_fn=lambda: signal.signal(signal.SIGTSTP, signal.SIG_IGN),

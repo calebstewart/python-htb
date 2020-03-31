@@ -34,8 +34,10 @@ class GobusterScanner(Scanner):
 
         output_path = os.path.join(path, "scans", f"{self.ident(service)}.txt")
 
-        wordlist = machine.connection.config["gobuster"].get(
-            "wordlist", "/usr/share/wordlists/dirbuster/directory-list-2.3-small.txt"
+        wordlist = machine.connection.config.get(
+            "gobuster",
+            "wordlist",
+            fallback="/usr/share/wordlists/dirbuster/directory-list-2.3-small.txt",
         )
         url = f"{hostname}:{service.port}"
 

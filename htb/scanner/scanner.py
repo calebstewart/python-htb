@@ -250,7 +250,8 @@ class ExternalScanner(Scanner):
                 line = b""
 
                 # We don't want a busy loop. Sleep after every line
-                time.sleep(0.1)
+                if tracker.silent:
+                    time.sleep(0.1)
             else:
                 line += data
 

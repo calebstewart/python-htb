@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+from typing import Union
 import subprocess
 import signal
 import shlex
@@ -7,12 +8,14 @@ import sys
 import os
 
 # from htb.machine import Machine
-from htb.scanner.scanner import Scanner, Service, Tracker
+from htb.scanner.scanner import ExternalScanner, Scanner, Service, Tracker
 from htb import util
 
 
-class GobusterScanner(Scanner):
+class GobusterScanner(ExternalScanner):
     """ Scan a web server with for directories/files with Gobuster """
+
+    LINE_DELIM = [b"\n", b"\r"]
 
     def __init__(self):
         super(GobusterScanner, self).__init__(
@@ -41,8 +44,12 @@ class GobusterScanner(Scanner):
         )
         url = f"{hostname}:{service.port}"
 
-        # Call gobuster
-        tracker.data["popen"] = subprocess.Popen(
+        yield from super(GobusterScanner, self).scan(
+            tracker,
+            path,
+            hostname,
+            machine,
+            service,
             [
                 "gobuster",
                 "dir",
@@ -55,36 +62,14 @@ class GobusterScanner(Scanner):
                 "-u",
                 url,
             ],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            preexec_fn=lambda: signal.signal(signal.SIGTSTP, signal.SIG_IGN),
         )
 
-        line = b""
-
-        while tracker.data["popen"].poll() is None:
-
-            # Grab next byte
-            data = tracker.data["popen"].stdout.read(1)
-
-            # Not silent, output
-            if not tracker.silent:
-                sys.stdout.write(data.decode("utf-8"))
-
-            if data == b"\n" or data == b"\r":
-                # Set status
-                if line.startswith(b"Progress:"):
-                    yield line.split(b"Progress:")[1].decode("utf-8").strip()
-                line = b""
-
-                # We don't want a busy loop. Sleep after every line
-                time.sleep(0.1)
-            else:
-                line += data
-
-            # time.sleep(0.1)
-
-        yield "completed"
+    def do_line(
+        self, tracker: Tracker, scanner: Scanner, line: bytes
+    ) -> Union[None, str]:
+        if line.startswith(b"Progress:"):
+            return line.split(b"Progress:")[1].decode("utf-8").strip()
+        return None
 
     def cancel(self, tracker: Tracker) -> None:
         """ Ensure the running process dies """

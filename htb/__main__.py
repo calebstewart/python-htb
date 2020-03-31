@@ -83,6 +83,7 @@ class HackTheBox(Cmd):
             analysis_path=self.config["htb"].get("analysis_path", "~/htb"),
             twofactor_prompt=self.twofactor_prompt,
             subscribe=True,
+            config=self.config,
         )
 
         self.prompt = (
@@ -356,11 +357,15 @@ class HackTheBox(Cmd):
         a = self.cnxn.assigned
 
         if m.spawned and self.cnxn.assigned is None:
-            self.poutput(f"{m.name}: machine already running, transferring ownership...")
+            self.poutput(
+                f"{m.name}: machine already running, transferring ownership..."
+            )
             m.assigned = True
             return
         elif m.spawned and self.cnxn.assigned is not None:
-            self.poutput(f"unable to transfer machine. {self.cnxn.assigned.name} is currently assigned.")
+            self.poutput(
+                f"unable to transfer machine. {self.cnxn.assigned.name} is currently assigned."
+            )
             return
 
         self.psuccess(f"starting {m.name}")
@@ -510,19 +515,20 @@ class HackTheBox(Cmd):
         output.append(
             f"{Style.BRIGHT}{'Blood':<6}{Style.RESET_ALL}{m.blood['user']['name']:<{user_width}}{m.blood['root']['name']}"
         )
-        
+
         if len(m.services):
             output.append("")
-            
+
             table = [["Port", "Protocol", "Name", "Version"]]
             for service in m.services:
-                table.append([f"{service.port}", f"{service.protocol}", service.name, ""])
-            
+                table.append(
+                    [f"{service.port}", f"{service.protocol}", service.name, ""]
+                )
+
             output.extend(util.build_table(table))
         else:
             output.append("")
             output.append(f"{Style.BRIGHT}No enumerated services.{Style.RESET_ALL}")
-            
 
         self.ppaged("\n".join(output))
 
@@ -545,20 +551,26 @@ class HackTheBox(Cmd):
             if args.machine.resetting:
                 args.machine.resetting = False
                 self.psuccess(f"{args.machine.name}: pending reset cancelled")
-    
+
     def wait_for_machine(self, machine: Machine) -> bool:
-    
+
         # Start the machine if we don't have a machine assigned
         self.pwarning(f"starting {machine.name}")
         machine.spawned = True
-    
+
         # Ensure the device is up before we scan
         self.pwarning(f"waiting for machine to respond to ping...")
         try:
             # Wait for a positive ping response
             while True:
-                if subprocess.call(["ping", "-c", "1", machine.ip], stdout=subprocess.DEVNULL,
-                                   stderr=subprocess.DEVNULL) == 0:
+                if (
+                    subprocess.call(
+                        ["ping", "-c", "1", machine.ip],
+                        stdout=subprocess.DEVNULL,
+                        stderr=subprocess.DEVNULL,
+                    )
+                    == 0
+                ):
                     self.psuccess(f"received ping response!")
                     break
                 time.sleep(5)
@@ -569,19 +581,21 @@ class HackTheBox(Cmd):
             # Give the machine some time to start services after networking comes up
             self.poutput(f"waiting for services to start...")
             time.sleep(10)
-    
+
         # Ensure we grab the newest machine status
         self.cnxn.invalidate_cache()
-        
+
         return True
 
     def _machine_enum(self, args: argparse.Namespace) -> None:
         """ Perform initial service enumeration """
-    
+
         if not args.machine.spawned:
             if self.cnxn.assigned is not None:
                 # We can't assign this machine, if we already have a machine assigned.
-                self.pwarning(f"unable to start {args.machine.name}. {self.cnxn.assigned.name} is already assigned.")
+                self.pwarning(
+                    f"unable to start {args.machine.name}. {self.cnxn.assigned.name} is already assigned."
+                )
                 return
             elif not self.wait_for_machine(args.machine):
                 return
@@ -616,10 +630,12 @@ class HackTheBox(Cmd):
 
         # args.machine shorthand
         m = args.machine
-        
+
         if not m.spawned:
             if self.cnxn.assigned is not None:
-                self.perror(f"unable to start {m.name}. {self.cnxn.assigned.name} is currently assigned.")
+                self.perror(
+                    f"unable to start {m.name}. {self.cnxn.assigned.name} is currently assigned."
+                )
                 return
             elif not self.wait_for_machine(m):
                 return

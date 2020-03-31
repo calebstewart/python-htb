@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 from typing import Any, Dict, List, Union, Callable
+from configparser import ConfigParser
 import threading
 import requests
 import time
@@ -25,8 +26,12 @@ class Connection(object):
         analysis_path=None,
         twofactor_prompt: Callable = None,
         subscribe: bool = False,
+        config: ConfigParser = ConfigParser(),
     ):
         """ Construct a connection with the specified API key """
+
+        # Save configuration info
+        self.config = config
 
         # Save the API key
         self.api_token: str = api_token

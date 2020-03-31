@@ -52,6 +52,18 @@ The `connection` and `session` options are filled automatically on running to
 track sessions between running `htb` and the connection which `htb lab` is able
 to create with Network Manager.
 
+This configuration is also passed to all scanners, allowing scanner specific
+options to be specified. At this time, only one scanner utilizes the
+configuraiton: `gobuster`. You can specify the worldist path under the
+`gobuster` section. The default wordlist is the `dirbuster` small wordlist in
+the Kali default wordlists directory. As an example, you can specify an
+alternate like:
+
+```ini
+[gobuster]
+wordlist = /usr/share/dirbuster/directory-list-lowercase-2.3-medium.txt
+```
+
 ## Example Command Line Usage
 
 The Command Line Interface provides two methods for invocation. The first
